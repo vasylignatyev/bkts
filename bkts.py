@@ -150,7 +150,8 @@ class App(threading.Thread):
               "`future_video_url` TEXT," \
               "`future_video_dttm` INTEGER," \
               "`future_audio_url` TEXT," \
-              "`future_audio_dttm` INTEGER)"
+              "`future_audio_dttm` INTEGER," \
+              "PRIMARY KEY(`id`,`direction`))"
         self.db().execute(sql)
         #Create leg table
         sql = "DROP TABLE IF EXISTS leg"
@@ -947,6 +948,7 @@ class App(threading.Thread):
             self.routeName = route.get('name', None)
             print(" ROUTE NAME: {}".format(self.routeName))
             self.routeGuid = route.get('guid', None)
+            print("routeGuid: {}".format(str(self.routeGuid)))
             self.rate = route.get('rate', None)
 
             self.driverId = driver.get('id', None)
@@ -1075,7 +1077,6 @@ class App(threading.Thread):
             except Exception as e:
                 print(e)
 
-
             self.route_id = route.get('id', None)
             self.routeName = route.get('name', None)
             self.routeGuid = route.get('guid', None)
@@ -1096,53 +1097,58 @@ class App(threading.Thread):
 
             #self._driverValidated = True
 
-            print("GET EQUPMENT")
-            url = 'http://st.atelecom.biz/mob/v1/front/equipments/index?vehicle={}'.format(self.vehicle_id)
-            print(url)
-            r = requests.get(url, headers=self.get_auth_header())
-            print("status: " + str(r.status_code))
-            if r.status_code == 200:
-                self._equipments = r.json()
-
-            #VALIDATOR registration
-            headers = dict(AUTHORIZATION='Bearer {}'.format(self._mac))
-
-            print("VALIDATOR")
-            print(self.validator_array)
-            for validator in self.validator_array:
-                print("VALIDATOR")
-                print(validator)
-                mac = validator.get('mac', None)
-                payload = dict(
-                    device_mac_address=mac,
-                    device_serial_number=mac,
-                    code=200,
-                    staff_id=self.driverId,
-                    vehicle_id=self.vehicle_id,
-                    route_id=self.route_id,
-                    sw_version=validator.get('sw_version', None),
-                    hw_version=validator.get('hw_version', None),
-                    status=200,
-                    mac=mac,
-                    location=dict(
-                        lat=0,
-                        lng=0,
-                        timestamp=int(datetime.datetime.now().strftime("%s"))
-                    )
-                )
-                # Send request
-                url = 'http://st.atelecom.biz/mob/v1/front/alarms/status'
-                print("Sending request to '{}'".format(url))
-                print("Payload")
-                print(payload)
-                r = requests.post(url, json=payload, headers=self.get_auth_header())
-                print('RESPONCE')
-                print(r)
-                self._driver_on_route = True
-                return True
-
+            self.get_equipment()
+            self.validator_registration()
+            return True
         else:
             raise MyError(self.getError('inaccessible'))
+
+    def get_equipment(self):
+        print("get_equipment")
+
+        url = 'http://st.atelecom.biz/mob/v1/front/equipments/index?vehicle={}'.format(self.vehicle_id)
+        print(url)
+        r = requests.get(url, headers=self.get_auth_header())
+        print("status: " + str(r.status_code))
+        if r.status_code == 200:
+            self._equipments = r.json()
+
+    def validator_registration(self):
+        print("validator_registration")
+        #headers = dict(AUTHORIZATION='Bearer {}'.format(self._mac))
+        print(self.validator_array)
+        for validator in self.validator_array:
+            print("VALIDATOR")
+            print(validator)
+            mac = validator.get('mac', None)
+            payload = dict(
+                device_mac_address=mac,
+                device_serial_number=mac,
+                code=200,
+                staff_id=self.driverId,
+                vehicle_id=self.vehicle_id,
+                route_id=self.route_id,
+                sw_version=validator.get('sw_version', None),
+                hw_version=validator.get('hw_version', None),
+                status=200,
+                mac=mac,
+                location=dict(
+                    lat=0,
+                    lng=0,
+                    timestamp=int(datetime.datetime.now().strftime("%s"))
+                )
+            )
+            # Send request
+            url = 'http://st.atelecom.biz/mob/v1/front/alarms/status'
+            print("Sending request to '{}'".format(url))
+            print("Payload")
+            print(payload)
+            r = requests.post(url, json=payload, headers=self.get_auth_header())
+            print('RESPONCE')
+            print(r)
+            self._driver_on_route = True
+            return True
+
 
     def code_validation(self, code):
         payload = dict(
@@ -1521,8 +1527,8 @@ class App(threading.Thread):
     def local_exec(self):
         pass
         #print("local_exec")
-        #self.get_messages()
-        #self.check_validators()
+        self.get_messages()
+        self.check_validators()
 
     def check_internet(self):
         response = os.system("ping -c 1 " + "google.com")
