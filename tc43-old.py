@@ -4,7 +4,7 @@
 import sys
 from PyQt5.QtWidgets import QMainWindow, QApplication, QPushButton, QWidget, QAction, QTabWidget, QVBoxLayout, QHBoxLayout, QStatusBar, QLabel, QGridLayout, QScrollArea, QFrame, QDialog, QTabBar, QMessageBox, QSizePolicy
 from PyQt5.QtGui import QIcon, QPixmap, QFont, QPainter, QMovie, QPen, QColor
-from PyQt5.QtCore import pyqtSlot, QTimer, QSize, QPoint, QMargins, Qt, QRect
+from PyQt5.QtCore import pyqtSlot, QTimer, QSize, QPoint, QMargins, Qt, QRect, QUrl
 from PyQt5.QtWebKitWidgets import QWebView
 from time import localtime, strftime
 import time
@@ -129,7 +129,7 @@ def ping_device(t):
     if isinstance(ndx, int):
         prev = status_array[ndx]
         status_array[ndx] = 1 if re is 0 else 0
-        #print("status of {} changed: from {} to {}".format(ndx, prev, status_array[ndx]))
+        print("status of {} changed: from {} to {}".format(ndx, prev, status_array[ndx]))
         return ((prev != status_array[ndx]), status_array[ndx])
     return (False, status_array[ndx])
 
@@ -195,23 +195,51 @@ def on_route_info(args):
                 status_array[SENSOR_NDX['modem']] = -1
 
 
-def on_arrival(payload_dict):
-    print("on_arrival")
+def on_stop_info(payload_dict):
+    print("on_stop_info")
     print(payload_dict)
-
     db = sqlite3.connect('bkts.db')
     db.create_function("t_diff", 2, t_diff)
     if 'difference' in payload_dict and 'schedule_id' in payload_dict:
-        pass
+        sql = "UPDATE leg set period = 0, variation={var} WHERE schedule_id={sid}"
+        sql = sql.format(var=payload_dict['difference'], sid=payload_dict['schedule_id'])
+        #print(sql)
+        db.execute(sql)
 
-    get_route(True, payload_dict.get('round',1),payload_dict.get('direction',1))
+        sql = "SELECT time(`stime`) FROM leg WHERE schedule_id={sid}"
+        sql = sql.format(sid=payload_dict['schedule_id'])
+        print(sql)
+        cursor = db.execute(sql)
+        row = cursor.fetchone()
+        if row is not None:
+            sql = "UPDATE leg SET `period`=-2000 WHERE time(stime) < '{cstime}'"
+            sql = sql.format(cstime=row[0])
+            print(sql)
+            db.execute(sql)
+        cursor.close()
+        sql = "SELECT time(`stime`), period, schedule_id FROM leg ORDER BY time(`stime`)"
+        cursor = db.execute(sql)
+        current_stop_time = None
+        for row in cursor:
+            if row[1] > -2000:
+                if current_stop_time is None:
+                    current_stop_time = row[0]
+                else:
+                    if current_stop_time is not None:
+                        sql = "UPDATE leg SET period = t_diff('{cst}', time(`stime`)) WHERE schedule_id = {sid}"
+                        sql = sql.format(cst=current_stop_time, sid=row[2])
+                        print(sql)
+                        db.execute(sql)
+        db.commit()
+    else:
+        print("expected difference & schedule_id")
+    get_route(True, 1, 1)
     db.close()
 
 def on_departure(payload_dict):
     global stop_body_renew, stop_body
-    print("on_departure")
-    print(payload_dict)
-    stop_body = get_route(True, payload_dict.get('round',1),payload_dict.get('direction',1))
+    print("payload_dict")
+    stop_body = get_route( True, 1, 1)
     #tab_stop_body(stop_body)
     stop_body_renew = True
 
@@ -228,7 +256,7 @@ def on_message(mosq, obj, msg):
             elif _type == 201:
                 on_route_info(payload_dict)
             elif _type == 220:
-                on_arrival(payload_dict)
+                on_stop_info(payload_dict)
             elif _type == 221:
                 on_departure(payload_dict)
             else:
@@ -261,7 +289,7 @@ except Exception as e:
     exit(1)
 
 mqtt_client.loop_start()
-mqtt_client.subscribe("t_driver")
+mqtt_client.subscribe("t_informer")
 mqtt_client.on_message = on_message
 mqtt_client.on_connect = on_connect  # attach function to callback
 
@@ -1218,7 +1246,6 @@ demo_ts_data = [
 
 
 def get_route(visible, current_round, direction):
-    print("get_route")
     if visible and current_round is not None and direction is not None:
         try:
             db = sqlite3.connect('bkts.db')
@@ -1257,7 +1284,7 @@ def get_route(visible, current_round, direction):
                     schedule=period,
                     lag=0,
                 )
-                print("append stop")
+                #print("append stop")
                 tab_body.append(schedule_line)
                 if len(tab_body) > 1:
                     tab_body[len(tab_body) - 2]['lag'] = tab_body[len(tab_body) - 1]['lag']
@@ -1273,29 +1300,22 @@ def get_route(visible, current_round, direction):
             cursor = db.execute(sql)
             for row in cursor:
                 print(row)
-                print("append stop 7")
-                '''
+
                 if row[4] > -1000:
-                    #diff = (-1) * int(row[4]/60)
-                    #print("diff: {}".format(str(diff)))
-                    diff=0
+                    #if diff is None:
+                    diff = (-1) * int(row[4]/60)
                     set_sb_delay(diff)
-                '''
-                print("append stop 6")
                 schedule_line = dict(
                     name=row[1],
                     schedule= int(row[3]/60) if row[3]>0 else row[3],
                     lag= int(row[4]) if row[4] < -1000 else (-1)*int(row[4]/60),
                     #lag= -2000,
                 )
-                print("append stop 2")
+                #print("append stop")
                 tab_body.append(schedule_line)
-                print("append stop 3")
-            cursor.close()
-            print("append stop 4")
+
             if len(tab_body) == 0:
                 tab_body = [dict(name="", schedule=0, lag=0), ]
-            print("append stop 5")
             return tab_body
 
         except KeyboardInterrupt as e:
@@ -1381,7 +1401,7 @@ def tab_call_operator(e, w):
     global last_ll
     print("tab_call_operator")
     payload = dict(
-        type=101,
+        type=100,
         lat=last_ll.get('lon'),
         lon=last_ll.get('lat'),
         timestamp=int(time.time()),
@@ -1659,14 +1679,8 @@ def check_new_messages():
     # Empty Messages
 #    del messages[:]
     # Select messages
-
     sql = "SELECT `id`,`created_at`,`new`,`title`,`text` FROM message ORDER BY created_at"
-    try:
-        cur = db.execute(sql)
-    except Exception as e:
-        print(e)
-        return
-
+    cur = db.execute(sql)
     redraw_f = False
     for row in cur:
         (_id, created_at, new, title, text) = row
@@ -1729,50 +1743,47 @@ def local_exec():  # every 1sec
     demo_cnt += 1
 
     if active_tab is DEFAULT_TAB:
-        print("local_def_tab")
         local_def_tab()
 
-    if demo_cnt % 2 == 0:
-        print("check files")
-        try:
-            with open(DRIVER_JSON, 'r') as infile:
-                key = 'name'
-                driver_name = json.load(infile).get(key, None)
-                if driver_name is not None:
-                    #check driver registration
-                    if driver_registered is False:
-                        driver_registered = True
-                        #stop_body = get_route(driver_registered, current_round, current_direction)
-                        if stop_body is not None:
-                            tab_stop_body(stop_body)
-                        sb_driver.setText(driver_name)
+    try:
+        with open(DRIVER_JSON, 'r') as infile:
+            key = 'name'
+            driver_name = json.load(infile).get(key, None)
+            if driver_name is not None:
+                #check driver registration
+                if driver_registered is False:
+                    driver_registered = True
+                    #stop_body = get_route(driver_registered, current_round, current_direction)
+                    if stop_body is not None:
+                        print("1")
+                        tab_stop_body(stop_body)
+                        print("2")
+#                    registrationOK()
+                    sb_driver.setText(driver_name)
+            else:
+                print('Missed "' + key + '" in ' + DRIVER_JSON)
+        infile.close()
 
-                else:
-                    print('Missed "' + key + '" in ' + DRIVER_JSON)
-                infile.close()
-        except FileNotFoundError as e:
-            # print('File ' + DRIVER_JSON + ' not found')
-            if driver_registered is True:
-                driver_registered = False
-                stop_body = get_route(driver_registered, 1, 1)
-                tab_stop_body(stop_body)
-        try:
-            with open(VEHICLE_JSON, 'r') as infile:
-                registrationOK()
-                infile.close()
-        except FileNotFoundError as e:
-            print(e)
+        with open(VEHICLE_JSON, 'r') as infile:
+             registrationOK()
+        infile.close()
+    except FileNotFoundError:
+        #print('File ' + DRIVER_JSON + ' not found')
+        if driver_registered is True:
+            driver_registered = False
+            stop_body = get_route(driver_registered,1,1)
+            tab_stop_body(stop_body)
+#            registrationOK()
+#            sb_driver.setText(data['statusbar']['driver'])  # default
 
     if active_tab is STOP_TAB:
         if stop_body_renew:
-            print("tab_stop_body")
             stop_body_renew=False
             tab_stop_body(stop_body)
 
 
     # **********************************************************************
     if bort_started_at > 0: #active_tab is MAP_TAB:
-        print("bort_started_at")
         ndx = (int(time.time() - bort_started_at)) % tab_data_map_len
         la, lo = str(tab_data['map'][ndx][0]), str(tab_data['map'][ndx][1])
         ndx = (int(time.time() - bort_started_at)) % tab_data_map_len
@@ -1788,11 +1799,8 @@ def local_exec():  # every 1sec
         mqtt_client.publish("t_bkts", resultJSON)
 
     # recheck messages & redraw new (every RECHECK_MESSAGES seconds)
-'''
     if (demo_cnt % RECHECK_MESSAGES) == 0:
         check_new_messages()
-'''
-
 
 '''
     # demo3

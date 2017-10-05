@@ -15,17 +15,11 @@ import math
 from uuid import getnode as get_mac
 
 
-# mac = '0123456789AB';
-
-my_type = type;
-
-def go():
-    print('ok')
 def main():
     print("Start main!")
     app = App()
 
-# *******************************************************************************************************
+
 class MyError(Exception):
     def __init__(self, _error: object) -> object:
         #print("Inside MyError")
@@ -37,7 +31,6 @@ class MyError(Exception):
         return repr(self.message)
 
 
-# *******************************************************************************************************
 class App(threading.Thread):
     #def __init__(self, q, loop_time = 1.0/60):
     def __init__(self):
@@ -47,6 +40,14 @@ class App(threading.Thread):
 
         #threading.Thread.__init__(self)
         self.start()
+
+        #Constants
+
+        self.DATABASE='/opt/telecard/bkts.db'
+        self.DRIVERJSON='/opt/telecard/driver.json'
+        self.ROUTEJSON='/opt/telecard/route.json'
+        self.VEHICLEJSON='/opt/telecard/vehicle.json'
+        self.SESSIONJSON='/opt/telecard/session.json'
 
         self.token = None
         self.routeName = None
@@ -64,11 +65,13 @@ class App(threading.Thread):
         self._driver_exist = False
         self._driver_on_vehicle = False
 
-        #self._mac = "b827eb3001c2"
+        self._sw_version="1.0.0"
+        self._hw_version="RASPBERRY PI 3 MODEL B",
         self._mac = hex(get_mac())[2:14]
         print("my MAC is: {}".format(self._mac))
+
         self._actual_route_info = False
-        #self.vehicle_type_ukr = None
+        self.vehicle_type_ukr = None
         self.route_dict_eng = None
         self._message_id = 1
         self.vehicle_type_short = None
@@ -76,7 +79,8 @@ class App(threading.Thread):
         self.latitude = 0.0
         self.longitude = 0.0
         #stop_distance = 0.000547559129223524
-        self.stop_distance = 0.000000299820999996023854551154978576
+        #self.stop_distance = 0.000000299820999996023854551154978576
+        self.stop_distance = 0.0000002
 
         self.validator_array = []
 
@@ -110,11 +114,11 @@ class App(threading.Thread):
 
         #delete service files
         try:
-            os.remove('driver.json')
+            os.remove(self.DRIVERJSON)
         except Exception as e:
             print(e)
         try:
-            os.remove('vehicle.json')
+            os.remove(self.VEHICLEJSON)
         except Exception as e:
             print(e)
 
@@ -132,8 +136,30 @@ class App(threading.Thread):
         #UDF DECLARATION
         #self._db.create_function("dist", 4, self.dist)
 
-        #self._db.execute("DROP TABLE IF EXISTS point")
+        self.db().execute("DROP TABLE IF EXISTS point")
         #Create point
+        sql = "CREATE TABLE IF NOT EXISTS point " \
+              "(`id` INTEGER," \
+              "`name` TEXT,`order` INTEGER," \
+              "`direction` INTEGER," \
+              "`type` INTEGER," \
+              "`entrance` INTEGER," \
+              "`radius` INTEGER," \
+              "`latitude` REAL," \
+              "`longitude` REAL," \
+              "`now_audio_url` TEXT," \
+              "`now_audio_dttm` INTEGER," \
+              "`now_video_url` TEXT," \
+              "`now_video_dttm` INTEGER," \
+              "`future_video_url` TEXT," \
+              "`future_video_dttm` INTEGER," \
+              "`future_audio_url` TEXT," \
+              "`future_audio_dttm` INTEGER," \
+              "PRIMARY KEY(`id`,`direction`))"
+
+        self.db().execute(sql)
+        #Create leg table
+        self.db().execute("DROP TABLE IF EXISTS leg")
         sql = "CREATE TABLE IF NOT EXISTS point " \
               "(`id` INTEGER primary key," \
               "`name` TEXT,`order` INTEGER," \
@@ -151,10 +177,7 @@ class App(threading.Thread):
               "`future_video_dttm` INTEGER," \
               "`future_audio_url` TEXT," \
               "`future_audio_dttm` INTEGER," \
-              "PRIMARY KEY(`id`,`direction`))"
-        self.db().execute(sql)
-        #Create leg table
-        sql = "DROP TABLE IF EXISTS leg"
+              "PRIMARY KEY(`id`))"              #"PRIMARY KEY(`id`,`direction`))"
         self.db().execute(sql)
         sql = 'CREATE TABLE IF NOT EXISTS `leg` '\
               '(`schedule_id` INTEGER primary key,'\
@@ -162,8 +185,9 @@ class App(threading.Thread):
               '`stime` TEXT,'\
               '`period` INTEGER,'\
               '`variation` INTEGER)'
-
         self.db().execute(sql)
+
+        self.db().execute("DROP TABLE IF EXISTS schedule")
         #Create schedule
         sql = "CREATE TABLE IF NOT EXISTS schedule ("\
               "`id` INTEGER primary key,"\
@@ -173,7 +197,8 @@ class App(threading.Thread):
               "`date` INTEGER,"\
               "`time` TEXT)"
         self.db().execute(sql)
-        # self._db.execute("DROP TABLE IF EXISTS message")
+
+        self._db.execute("DROP TABLE IF EXISTS message")
         # CREATE message
         sql = "CREATE TABLE IF NOT EXISTS message " \
               "(`id` INTEGER primary key," \
@@ -191,16 +216,16 @@ class App(threading.Thread):
     def db(self):
         if self._db is None:
             print("connect to database")
-            self._db = sqlite3.connect('bkts.db')
+            self._db = sqlite3.connect(self.DATABASE)
             self._db.create_function("dist", 4, self.dist)
             self._db.create_function("t_diff", 2, self.t_diff)
         return self._db
 
     def db_exec(self, sql):
         try:
-            #print(sql)
             return self.db().execute(sql)
         except sqlite3.Error as e:
+            print(sql)
             print("DB ERROR: " + str(e))
             raise MyError(self.getError('db_error'))
 
@@ -324,7 +349,7 @@ class App(threading.Thread):
 
     def get_messages(self):
         #print("get_messages")
-        db = sqlite3.connect('bkts.db')
+        db = sqlite3.connect(self.DATABASE)
         c = db.cursor()
         sql="SELECT MAX(`id`) FROM message"
         c.execute(sql)
@@ -348,7 +373,7 @@ class App(threading.Thread):
                 created_at = message.get('created_at')
 
                 sql = "INSERT INTO message (`id`,`title`,`text`,`created_at`) VALUES ('{}','{}','{}','{}')".format(m_id,title, text, created_at)
-                print(sql)
+                #print(sql)
                 db.execute(sql)
             db.commit()
             #message_cursor = db.execute("SELECT `title`,`text` FROM message")
@@ -369,7 +394,7 @@ class App(threading.Thread):
     def get_route_info(self, driver_id):
         if self._actual_route_info:
             print("Route Information is up to date")
-            return True
+            #return True
         print("Route Information needs to be updated")
         url = 'http://st.atelecom.biz/mob/v1/front/staff/route?id={}'.format(driver_id)
         print(url)
@@ -456,7 +481,7 @@ class App(threading.Thread):
 
 
 
-        sql = "SELECT s.`id`,p.`name`, s.time " \
+        sql = "SELECT s.`id`,p.`name`,s.time,p.`id` " \
               "FROM schedule s " \
               "INNER JOIN point p  ON s.station_id = p.id AND s.`direction`= p.`direction` " \
               "WHERE s.round={r} AND s.`date`={wd} AND s.`direction`={dir} AND p.`type`=1 " \
@@ -472,10 +497,10 @@ class App(threading.Thread):
                 if first_time is None:
                     first_time = row[2]
                     #sql = insert.format(s_id=row[0],name=row[1],stime=row[2],period=0,var=self.t_diff(row[2],time_now.strftime('%H:%M:%S'), False))
-                    sql = insert.format(s_id=row[0],name=row[1],stime=row[2],period=0,var=-2000)
+                    sql = insert.format(s_id=row[3],name=row[1],stime=row[2],period=0,var=-2000)
                 else:
                     #sql = insert.format(s_id=row[0],name=row[1],stime=row[2], period=self.t_diff(row[2], first_time), var=self.t_diff(row[2],time_now.strftime('%H:%M:%S'), False))
-                    sql = insert.format(s_id=row[0],name=row[1],stime=row[2], period=self.t_diff(row[2], first_time), var=-2000)
+                    sql = insert.format(s_id=row[3],name=row[1],stime=row[2], period=self.t_diff(row[2], first_time), var=-2000)
                 self.db_exec(sql)
         cursor.close()
         self.db().commit()
@@ -510,10 +535,15 @@ class App(threading.Thread):
         sql = sql.format(r=self._round, wd=self.current_weekday, dir=self._direction)
         row = self.db_exec(sql).fetchone()
         print(row)
+        if row is None:
+            print("Empty Table")
+            return False
+
         self.last_point_name = row[0]
         self.last_point_id = row[1]
 
         self.to_informer(req_dict)
+        self.to_driver(req_dict)
 
         #Clear leg list
         headers = dict(AUTHORIZATION='Bearer {}'.format(self.token))
@@ -544,10 +574,11 @@ class App(threading.Thread):
 
         lat = float(reqDict['latitude'])
         lon = float(reqDict['longitude'])
-
+        if self._direction is None or self._round is None:
+            return False
         sql = "SELECT p.`name`, p.`id`, s.id, s.`time` FROM schedule s "\
               "INNER JOIN point p ON s.station_id = p.id AND s.`direction`= p.`direction` "\
-              "WHERE s.direction={dir} AND s.round={r} AND dist({lat}, {lon}, `latitude` ,`longitude`) < {dist}"
+              "WHERE p.`type`=1 AND s.`direction`={dir} AND s.`round`={r} AND dist({lat}, {lon}, `latitude` ,`longitude`) < {dist}"
         sql = sql.format(lat=lat, lon=lon, dist=self.stop_distance, dir=self._direction, r=self._round)
         #print(sql)
         cursor = self.db_exec(sql)
@@ -559,7 +590,7 @@ class App(threading.Thread):
                 self.current_schedule_id = int(station[2])
                 self.current_schedule_time = station[3]
 
-                print("Current s_id: {}, round: {} time: {}".format(str(self.current_schedule_id), str(self._round), str(self.current_schedule_time)))
+                print("Current s_id: {}, p_id {}, round: {} time: {}".format(str(self.current_schedule_id),str(self.current_point_id), str(self._round), str(self.current_schedule_time)))
 
                 self.on_arrival()
 
@@ -588,25 +619,28 @@ class App(threading.Thread):
             round=self._round,
             direction=self._direction,
             message_id=self._message_id,
-            timestamp=datetime.datetime.now().strftime("%s"),
+            timestamp=int(datetime.datetime.now().timestamp()),
         )
         self.to_informer(req_dict)
+        self.to_driver(req_dict)
 
     def check_validators(self):
-        print("check_validators")
+        #print("check_validators")
         if self.validator_array is not None:
-            print(type(self.validator_array))
+            #print(type(self.validator_array))
             for validator in self.validator_array:
                 mac = validator.get('mac', None)
                 if mac is not None:
+                    if validator['cnt'] > 0:
+                        #print("VALIDATOR: {} is not in order".format(mac))
+                        pass
                     validator['cnt'] = validator['cnt'] + 1
                     payload = dict(
                             type=1,
-                            timestamp=int(datetime.datetime.now().strftime("%s")),
+                            timestamp=int(datetime.datetime.now().timestamp()),
                             validator_id=mac,
                     )
                     self.to_validator(payload)
-        print(self.validator_array)
 
     def on_arrival(self):
         print("Arrive to: '{}'".format(self.current_point_name))
@@ -623,24 +657,73 @@ class App(threading.Thread):
         )
         self.to_validator(stop_info)
 
-        #SERCH STOP  INFORMATION
-        sql = "SELECT p.`name`,p.`id`,s.`id`,s.`time`,t_diff(s.time,'{at}')," \
-              "p.`now_audio_url`,p.`now_audio_dttm`,p.`now_video_url`,p.`now_video_dttm`, " \
-              "p.`future_audio_url`, p.`future_audio_dttm`, p.`future_video_url`, p.`future_video_dttm`" \
-              " FROM schedule s " \
-              "INNER JOIN point p  ON s.station_id = p.id AND s.`direction`= p.`direction` " \
-              "WHERE s.`time` >= '{st}' AND s.`date`={wd} AND p.`type`=1  AND s.`direction`={dir} AND s.`round`={r} " \
-              "ORDER BY s.time LIMIT 3"
-        sql = sql.format(wd=self.current_weekday, dir=self._direction, r=self._round, st=self.current_schedule_time, at=self.arrival_time )
+        #Update LEG table
+        sql = "UPDATE leg SET period = 0, variation={var} WHERE schedule_id={sid}"
+        sql = sql.format(var=difference, sid=self.current_point_id)
+        print(sql)
+        self.db_exec(sql)
+
+        sql = "SELECT time(`stime`) FROM leg WHERE schedule_id={sid}"
+        #sql = sql.format(sid=self.current_schedule_id)
+        sql = sql.format(sid=self.current_point_id)
         print(sql)
         cursor = self.db_exec(sql)
+        row = cursor.fetchone()
+        cursor.close()
+
+        if row is not None:
+            sql = "UPDATE leg SET `period`=-2000 WHERE time(stime) < '{cstime}'"
+            sql = sql.format(cstime=row[0])
+            #print(sql)
+            self.db_exec(sql)
+
+        sql = "SELECT time(`stime`), period, schedule_id FROM leg ORDER BY time(`stime`)"
+        cursor = self.db_exec(sql)
+        current_stop_time = None
+        for row in cursor:
+            if row[1] > -2000:
+                if current_stop_time is None:
+                    current_stop_time = row[0]
+                else:
+                    if current_stop_time is not None:
+                        sql = "UPDATE leg SET period = t_diff('{cst}', time(`stime`)) WHERE schedule_id = {sid}"
+                        sql = sql.format(cst=current_stop_time, sid=row[2])
+                        #print(sql)
+                        self.db_exec(sql)
+        self.db().commit()
 
         stop_info = dict(
             type=220,
             difference=difference,
-            #schedule_id=self.current_schedule_id
-            schedule_id=None
+            schedule_id=self.current_schedule_id,
+            direction=self._direction,
+            round=self._round,
         )
+
+        #SERCH STOP  INFORMATION
+        sql = "SELECT p.`name`," \
+              "p.`id`," \
+              "s.`id`,"\
+              "s.`time`," \
+              "t_diff(s.time,'{at}')," \
+              "p.`now_audio_url`," \
+              "p.`now_audio_dttm`," \
+              "p.`now_video_url`," \
+              "p.`now_video_dttm`, " \
+              "p.`future_audio_url`," \
+              "p.`future_audio_dttm`," \
+              "p.`future_video_url`," \
+              "p.`future_video_dttm`," \
+              "p.`direction` " \
+              "FROM schedule s " \
+              "INNER JOIN point p  ON s.station_id = p.id AND s.`direction`= p.`direction` " \
+              "WHERE s.`time` >= '{st}' AND s.`date`={wd} AND p.`type`=1  AND s.`direction`={dir} AND s.`round`={r} " \
+              "ORDER BY s.time LIMIT 3"
+
+        sql = sql.format(wd=self.current_weekday, dir=self._direction, r=self._round, st=self.current_schedule_time, at=self.arrival_time )
+        print(sql)
+        cursor = self.db_exec(sql)
+
         properties = ('curr_stop_info', 'next1_stop_info', 'next2_stop_info')
         for _property in properties:
             row = cursor.fetchone()
@@ -661,6 +744,7 @@ class App(threading.Thread):
                     future_audio_dttm=row[10],
                     future_video_url=row[11],
                     future_video_dttm=row[12],
+                    direction=row[13],
                 )
             else:
                 stop_info[_property] = dict(
@@ -670,26 +754,30 @@ class App(threading.Thread):
                     eta=0,
                 )
         self.to_informer(stop_info)
-        payload = dict(
-
-        )
-        self.to_itv(stop_info)
+        self.to_driver(stop_info)
+        #self.to_itv(stop_info)
 
     def on_departure(self, station):
         print("Departure from: '{}'".format(station))
         # SERCH STOP  INFORMATION
         sql = "SELECT p.`name`,p.`id`,s.`id`,s.`time`, s.`time`," \
               "p.`now_audio_url`,p.`now_audio_dttm`,p.`now_video_url`,p.`now_video_dttm`, " \
-              "p.`future_audio_url`, p.`future_audio_dttm`, p.`future_video_url`, p.`future_video_dttm`" \
-              " FROM `schedule` s " \
+              "p.`future_audio_url`,p.`future_audio_dttm`,p.`future_video_url`,p.`future_video_dttm`,p.`direction` "\
+              "FROM `schedule` s " \
               "INNER JOIN `point` p  ON s.`station_id` = p.`id` AND s.`direction`= p.`direction` " \
               "WHERE s.`time` >= '{st}' AND s.`date`={wd} AND p.`type`=1  AND s.`direction`={dir} AND s.`round` = {r} " \
               "ORDER BY s.time LIMIT 3"
 
         sql = sql.format(wd=self.current_weekday, dir=self._direction, r=self._round, st=self.current_schedule_time)
+        print(sql)
+
         cursor = self.db_exec(sql)
 
-        stop_info = dict(type=221)
+        stop_info = dict(
+            type=221,
+            round=self._round,
+            direction=self._direction,
+        )
         properties = ('curr_stop_info', 'next1_stop_info', 'next2_stop_info')
         current_stot_time = None
 
@@ -714,6 +802,7 @@ class App(threading.Thread):
                     future_audio_dttm=row[10],
                     future_video_url=row[11],
                     future_video_dttm=row[12],
+                    direction=row[13],
                 )
                 if i == 2:
                     next_stop_name = row[0]
@@ -725,6 +814,7 @@ class App(threading.Thread):
                     eta=0,
                 )
         self.to_informer(stop_info)
+        self.to_driver(stop_info)
 
         if next_stop_name is not None:
             stop_info = dict(
@@ -733,6 +823,9 @@ class App(threading.Thread):
                 eng="",
             )
         self.to_validator(stop_info)
+
+    def get_points(self):
+        print("get_points")
 
     def informer_reg_cb(self, reqDict):
         print('Call: informer_reg_cb')
@@ -778,11 +871,11 @@ class App(threading.Thread):
             location= dict(
                 lat=0,
                 lng=0,
-                timestamp=datetime.datetime.now().strftime("%s")
+                timestamp=int(datetime.datetime.now().timestamp())
             )
         )  # Send request
         url = 'http://st.atelecom.biz/mob/v1/front/alarms/status'
-        print( "Sending request to '{}'".format(url) )
+        print( "Sending request to '{}'".format(url))
         print("Payload")
         print(payload)
         r = requests.post(url, json=payload, headers=self.get_auth_header())
@@ -794,6 +887,7 @@ class App(threading.Thread):
             reqDict['timestamp'] = int(time.time())
             reqDict['success'] = 0
             self.to_informer(reqDict)
+            self.to_driver(reqDict)
         return False
 
     # Validator regisration event
@@ -814,7 +908,8 @@ class App(threading.Thread):
             status= reqDict.get('status'),
             sw_version= reqDict.get('sw_version'),
             hw_version= reqDict.get('hw_version'),
-            cnt=0
+            last_status=reqDict.get('status'),
+            cnt=0,
         )
         print(validator)
 
@@ -832,11 +927,12 @@ class App(threading.Thread):
         print(headers)
         print(payload)
         r = requests.put('http://st.atelecom.biz/bkts/api/registration', headers=headers, json=payload)
-
-        if r.status_code == requests.codes.ok:
-            response = r.json()
-            print("RESPONSE {}".format( str(r)))
-            print(response)
+        print("status_code: {}".format(str(r.status_code)))
+        #if r.status_code == requests.codes.ok:
+        if r.status_code == r.status_code:
+            #response = r.json()
+            #print("RESPONSE {}".format( str(r)))
+            #print(response)
             timestamp = int(time.time())
             result = dict(
                 type=self.type,
@@ -853,7 +949,7 @@ class App(threading.Thread):
             # go to payment mode
             payload = dict(
                 type=41,
-                timestamp=int(datetime.datetime.now().strftime("%s")),
+                timestamp=int(datetime.datetime.now().timestamp()),
                 ukr="",
                 eng="",
                 price=self.rate,
@@ -865,7 +961,7 @@ class App(threading.Thread):
             # go to registration mode
             payload = dict(
                 type=42,
-                timestamp=int(datetime.datetime.now().strftime("%s")),
+                timestamp=int(datetime.datetime.now().timestamp()),
                 ukr="",
                 eng="",
                 price=self.rate,
@@ -879,10 +975,9 @@ class App(threading.Thread):
     params: type, validator_id, message_id, driver_id
     Driver registration
     '''
-    def get_status_cb(self, payloadOBJ):
-        print("Call for get_status_cb")
+    def on_get_status_cb(self, payloadOBJ):
+        print("on_get_status_cb")
         print(payloadOBJ)
-        print(self.validator_array)
 
         current_validator_id = payloadOBJ.get("validator_id", None)
 
@@ -891,10 +986,7 @@ class App(threading.Thread):
             print("current_validator_id {}".format(current_validator_id))
             print("validator_id {}".format(validator_id))
             if current_validator_id is not None and current_validator_id == validator_id:
-                pass
-                cnt = validator.get("cnt", None)
-                print("CNT: {}".format(str(cnt)))
-
+                validator['cnt'] = 0
 
     def conductorCB(self, payloadOBJ):
         print("Call for conductorCB")
@@ -910,7 +1002,7 @@ class App(threading.Thread):
 
         driver = None
         try:
-            with open('driver.json', 'r') as infile:
+            with open(self.DRIVERJSON, 'r') as infile:
                 driver = json.load(infile)
                 infile.close()
         except Exception as e:
@@ -918,7 +1010,7 @@ class App(threading.Thread):
 
         route = None
         try:
-            with open('route.json', 'r') as infile:
+            with open(self.ROUTEJSON, 'r') as infile:
                 route = json.load(infile)
                 infile.close()
         except Exception as e:
@@ -926,7 +1018,7 @@ class App(threading.Thread):
 
         vehicle = None
         try:
-            with open('vehicle.json', 'r') as infile:
+            with open(self.VEHICLEJSON, 'r') as infile:
                 vehicle = json.load(infile)
                 infile.close()
         except Exception as e:
@@ -934,7 +1026,7 @@ class App(threading.Thread):
 
         session = None
         try:
-            with open('session.json', 'r') as infile:
+            with open(self.SESSIONJSON, 'r') as infile:
                 session = json.load(infile)
                 infile.close()
         except Exception as e:
@@ -968,7 +1060,7 @@ class App(threading.Thread):
             # go to payment mode
             payload = dict(
                 type=41,
-                timestamp=int(datetime.datetime.now().strftime("%s")),
+                timestamp=int(datetime.datetime.now().timestamp()),
                 ukr="",
                 eng="",
                 price=self.rate,
@@ -980,7 +1072,7 @@ class App(threading.Thread):
             # go to registration mode
             payload = dict(
                 type=42,
-                timestamp=int(datetime.datetime.now().strftime("%s")),
+                timestamp=int(datetime.datetime.now().timestamp()),
                 ukr="",
                 eng="",
                 price=self.rate,
@@ -1009,28 +1101,32 @@ class App(threading.Thread):
             route = response.get('route', None)
             #print(route)
             vehicle = response.get('vehicle', None)
-            ##
+            ##Open
             try:
-                with open('driver.json', 'w') as outfile:
+                print("OPEN: " + "self.DRIVERJSON")
+                with open(self.DRIVERJSON, 'w') as outfile:
                     json.dump(driver, outfile)
                 outfile.close()
             except Exception as e:
                 print(e)
 
-            #Compare ROUTE information
+            print("Compare ROUTE information")
             if route.get("id", None) is not None:
                 try:
-                    with open('route.json', 'r') as infile:
+                    print("OPEN: " + "self.ROUTEJSON")
+                    with open(self.ROUTEJSON, 'r') as infile:
                         old_route_info = json.load(infile)
                         old_updated_at = int(old_route_info.get("updated_at", None))
                         new_updated_at = int(route.get("updated_at", None))
-                        self._actual_route_info = True if old_updated_at == new_updated_at else False
+                        if old_updated_at is not None and new_updated_at is not None:
+                            self._actual_route_info = True if old_updated_at == new_updated_at else False
+                        else:
+                            self._actual_route_info = False
                     infile.close()
-
-                    with open('route.json', 'w') as outfile:
-                        print("new_route_info updated_at:  ")
+                    print("OPEN: " + "self.ROUTEJSON")
+                    with open(self.ROUTEJSON, 'w') as outfile:
                         print(route)
-                        print(route.get("updated_at"))
+                        print("new_route_info updated_at:  {}".format(str(route.get("updated_at"))))
                         json.dump(route, outfile)
                     outfile.close()
                     self._driver_on_route = False
@@ -1048,7 +1144,7 @@ class App(threading.Thread):
             if vehicle.get("id", None) is not None:
                 self._driver_on_vehicle = True
                 try:
-                    with open('vehicle.json', 'w') as outfile:
+                    with open(self.VEHICLEJSON, 'w') as outfile:
                         json.dump(vehicle, outfile)
                     outfile.close()
                     #print(vehicle)
@@ -1058,7 +1154,7 @@ class App(threading.Thread):
             else:
                 self._driver_on_vehicle = False
                 try:
-                    os.remove('vehicle.json')
+                    os.remove(self.VEHICLEJSON)
                 except Exception as e:
                     print(e)
 
@@ -1071,7 +1167,7 @@ class App(threading.Thread):
                 token=self.token,
             )
             try:
-                with open('session.json', 'w') as outfile:
+                with open(self.SESSIONJSON, 'w') as outfile:
                     json.dump(session, outfile)
                 outfile.close()
             except Exception as e:
@@ -1135,7 +1231,7 @@ class App(threading.Thread):
                 location=dict(
                     lat=0,
                     lng=0,
-                    timestamp=int(datetime.datetime.now().strftime("%s"))
+                    timestamp=int(datetime.datetime.now().timestamp())
                 )
             )
             # Send request
@@ -1183,7 +1279,7 @@ class App(threading.Thread):
                     print(e)
                 raise MyError(self.getError('conflict'))
         elif r.status_code == 201:
-            self.send_xdr(code)
+            #self.send_xdr(code)
             return True
         elif r.status_code == 200:  # composted
             raise MyError(self.getError('composted'))
@@ -1191,6 +1287,7 @@ class App(threading.Thread):
             print("NOT FOUND")
 
             raise MyError(self.getError('codeError'))
+        return False
 
     def send_xdr(self, code):
         print("send_xdr")
@@ -1205,16 +1302,13 @@ class App(threading.Thread):
         }
         '''
 
-        tnow=datetime.datetime.now().strftime("%s")
-        print("Now {}".format(str(tnow)))
-
         payload = dict(
             tid=1,
             rate=self.rate,
             vehicle_id=self.vehicle_id,
             route_id=self.route_id,
             hex=code,
-            time=datetime.datetime.now().strftime("%s")
+            time=int(datetime.datetime.now().timestamp())
         )
         url = 'http://st.atelecom.biz/mob/v1/front/portaone/payment'
         print(url)
@@ -1256,9 +1350,13 @@ class App(threading.Thread):
                 reqDict['route'] = self.routeGuid
                 #reqDict['equipment'] = self._equipments
             else:
-                self.code_validation(code)
+                if self.code_validation(code):
+                    reqDict['success'] = 0
+                    self.to_validator(reqDict)
+                    self.send_xdr(code)
 
             reqDict['success'] = 0
+            self.to_validator(reqDict)
 
         except MyError as e:
             reqDict['error'] = e.message
@@ -1279,6 +1377,7 @@ class App(threading.Thread):
         )
         print(routeDict)
         self.to_informer(routeDict)
+        self.to_driver(routeDict)
 
         return
 
@@ -1326,8 +1425,11 @@ class App(threading.Thread):
                 )
                 print(routeDict)
                 self.to_informer(routeDict)
+                self.to_driver(routeDict)
             else:
-                self.code_validation(code)
+                if self.code_validation(code):
+                    pass
+                    #self.send_xdr(code)
             reqDict['success'] = 0
         except MyError as e:
             print(e)
@@ -1442,7 +1544,7 @@ class App(threading.Thread):
             if _type == 0:  # 'Registration'
                 self.registrationCB(payload_dict)
             elif _type == 1:  # 'Driver'):
-                self.get_status_cb(payload_dict)
+                self.on_get_status_cb(payload_dict)
             elif _type == 10:  # QrValidation
                 self.qrValidationCB(payload_dict)
             elif _type == 11:
@@ -1492,19 +1594,19 @@ class App(threading.Thread):
         self.client.publish("t_informer", resultJSON)
         return
 
-    def to_itv(self, payload):
-        print("driver terminal")
+    def to_driver(self, payload):
+        print("to_driver")
         payload['timestamp'] = int((time.time())) + self._utc_offset
         print(payload)
         resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
-        self.client.publish("t_itv", resultJSON)
+        self.client.publish("t_driver", resultJSON)
         return
 
     def getRendomPoint(self):
         t = threading.Timer(7.0, self.getRendomPoint)
         t.start()
         try:
-            db = sqlite3.connect('bkts.db')
+            db = sqlite3.connect(self.DATABASE)
             pointCursor = db.execute("SELECT  * from point where type = 1 ORDER BY RANDOM() LIMIT 1")
             for stop in pointCursor:
                 print(stop)
@@ -1528,17 +1630,44 @@ class App(threading.Thread):
         pass
         #print("local_exec")
         self.get_messages()
-        self.check_validators()
+        #self.check_validators()
 
     def check_internet(self):
         response = os.system("ping -c 1 " + "google.com")
         # and then check the response...
         if response == 0:
-            print
-            hostname, 'is up!'
+            print("hostname, is up!")
         else:
-            print
-            hostname, 'is down!'
+            print("hostname, is down!")
+
+    def bkts_registration(self):
+        print("bkts_registration")
+
+        payload = dict(
+            device_mac_address=self._mac,
+            device_serial_number=self._mac,
+            code=200,
+            staff_id=self.driverId,
+            vehicle_id=self.vehicle_id,
+            route_id=self.route_id,
+            sw_version=self._sw_version,
+            hw_version=self._hw_version,
+            status=200,
+            mac=self._mac,
+            location=dict(
+                lat=0,
+                lng=0,
+                timestamp=int(datetime.datetime.now().timestamp())
+            )
+        )
+        # Send request
+        url = 'http://st.atelecom.biz/mob/v1/front/alarms/status'
+        print("Sending request to '{}'".format(url))
+        print("Payload")
+        print(payload)
+        r = requests.post(url, json=payload, headers=self.get_auth_header())
+        print('RESPONCE')
+        print(r)
 
     def run(self):
 
@@ -1547,7 +1676,6 @@ class App(threading.Thread):
         self.client.on_connect = self.on_connect  # attach function to callback
         self.client.on_message = self.on_message  # attach function to callback
         #self.client.on_message = self.on_message_new  # attach function to callback
-
         #self.client.message_callback_add("t_informer", self.on_informer)
         #self.client.message_callback_add("t_informer", self.on_informer)
 
@@ -1569,7 +1697,7 @@ class App(threading.Thread):
             # client.publish("test", "validate")
             loop_flag = 1
 
-            self.check_driver_registration()
+            #self.check_driver_registration()
 
             i = 0
             # counter=0
