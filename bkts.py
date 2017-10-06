@@ -372,7 +372,7 @@ class App(threading.Thread):
                 text = message.get('text')
                 created_at = message.get('created_at')
 
-                sql = "INSERT INTO message (`id`,`title`,`text`,`created_at`) VALUES ('{}','{}','{}','{}')".format(m_id,title, text, created_at)
+                sql = "INSERT OR IGNORE INTO message (`id`,`title`,`text`,`created_at`) VALUES ('{}','{}','{}','{}')".format(m_id,title, text, created_at)
                 #print(sql)
                 db.execute(sql)
             db.commit()
@@ -891,16 +891,16 @@ class App(threading.Thread):
         return False
 
     # Validator regisration event
-    def registrationCB(self, reqDict):
+    def on_validator_reg_cb(self, reqDict):
         print('Call: registrationCB')
 
-        # for name, val in reqDict.items(): vars(self)[name] = val
         args = ('type', 'validator_id', 'message_id', 'status', 'sw_version', 'hw_version', 'timestamp')
         try:
             for arg in args:
                 vars(self)[arg] = reqDict[arg]
         except KeyError as e:
             print("Required attribute: ", e)
+            return False
 
         validator = dict(
             type= reqDict.get('type'),
@@ -946,30 +946,9 @@ class App(threading.Thread):
             self.to_validator(result)
 
         if self._driver_on_route:
-            # go to payment mode
-            payload = dict(
-                type=41,
-                timestamp=int(datetime.datetime.now().timestamp()),
-                ukr="",
-                eng="",
-                price=self.rate,
-                route= self.routeGuid,
-            )
-            self.to_validator(payload)
-            print("Goto payment MODE")
+            self.goto_payment_mode()
         else:
-            # go to registration mode
-            payload = dict(
-                type=42,
-                timestamp=int(datetime.datetime.now().timestamp()),
-                ukr="",
-                eng="",
-                price=self.rate,
-                route= self.routeGuid,
-            )
-            print("Goto registration MODE")
-            self.to_validator(payload)
-
+            self.goto_registration_mode()
 
     '''
     params: type, validator_id, message_id, driver_id
@@ -994,12 +973,8 @@ class App(threading.Thread):
     def controllerCB(self, payloadOBJ):
         print("Call for controllerCB")
 
-    def renewCB(self, payloadOBJ):
-        print("Call for renewCB")
-
     def check_driver_registration(self):
         print("check_driver_registration")
-
         driver = None
         try:
             with open(self.DRIVERJSON, 'r') as infile:
@@ -1058,28 +1033,56 @@ class App(threading.Thread):
             self._driver_on_route = True
 
             # go to payment mode
-            payload = dict(
-                type=41,
-                timestamp=int(datetime.datetime.now().timestamp()),
-                ukr="",
-                eng="",
-                price=self.rate,
-                route=self.routeGuid,
-            )
-            self.to_validator(payload)
-            print("Goto payment MODE")
+            self.goto_payment_mode()
         else:
-            # go to registration mode
-            payload = dict(
-                type=42,
-                timestamp=int(datetime.datetime.now().timestamp()),
-                ukr="",
-                eng="",
-                price=self.rate,
-                route=self.routeGuid,
-            )
-            print("Goto registration MODE")
-            self.to_validator(payload)
+            self.goto_registration_mode()
+
+    def goto_refound_mode(self):
+        print("go_to_refound_mode")
+        payload = dict(
+            type=40,
+            timestamp=int(datetime.datetime.now().timestamp()),
+            ukr="",
+            eng="",
+            price=self.rate,
+            route=self.routeGuid,
+        )
+        self.to_validator(payload)
+
+    def goto_payment_mode(self):
+        print("go_to_validation_mode")
+        payload = dict(
+            type=41,
+            timestamp=int(datetime.datetime.now().timestamp()),
+            ukr="",
+            eng="",
+            price=self.rate,
+            route=self.routeGuid,
+        )
+        self.to_validator(payload)
+
+    def goto_registration_mode(self):
+        print("go_to_registration_mode")
+        payload = dict(
+            type=42,
+            timestamp=int(datetime.datetime.now().timestamp()),
+            ukr="реєстрація водія",
+            eng="driver registration",
+            price=self.rate,
+            route=self.routeGuid,
+        )
+        self.to_validator(payload)
+
+    def goto_waiting_mode(self):
+        print("goto_waiting_mode")
+        payload = dict(
+            type=43,
+            timestamp=int(datetime.datetime.now().timestamp()),
+            ukr="",
+            eng="",
+            route=self.routeGuid,
+        )
+        self.to_validator(payload)
 
     def driver_registration(self, code):
         print("driver_registration")
@@ -1348,23 +1351,21 @@ class App(threading.Thread):
                 reqDict['ukr'] = self.get_vehicle_type_ukr(self.routeGuid) + str(self.routeName)
                 reqDict['eng'] = self.get_vehicle_type_eng(self.routeGuid) + str(self.routeName)
                 reqDict['route'] = self.routeGuid
-                #reqDict['equipment'] = self._equipments
+                reqDict['success'] = 0
+
+                self.to_validator(reqDict)
             else:
                 if self.code_validation(code):
                     reqDict['success'] = 0
                     self.to_validator(reqDict)
+
                     self.send_xdr(code)
 
-            reqDict['success'] = 0
-            self.to_validator(reqDict)
 
         except MyError as e:
             reqDict['error'] = e.message
             reqDict['success'] = e.code
-
-        self.to_validator(reqDict)
-        #print("1")
-        self._message_id += 1
+            self.to_validator(reqDict)
 
         routeDict = dict(
             type=201,
@@ -1542,7 +1543,7 @@ class App(threading.Thread):
             _type = int(payload_dict.get('type', None))
 
             if _type == 0:  # 'Registration'
-                self.registrationCB(payload_dict)
+                self.on_validator_reg_cb(payload_dict)
             elif _type == 1:  # 'Driver'):
                 self.on_get_status_cb(payload_dict)
             elif _type == 10:  # QrValidation
@@ -1579,7 +1580,8 @@ class App(threading.Thread):
 
     # Send message to Validator
     def to_validator(self, payload):
-        print("to_validator")
+        print("to_validator1")
+        self._message_id += 1
         payload['timestamp'] = int((time.time())) + self._utc_offset
         print(payload)
         resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
@@ -1588,6 +1590,7 @@ class App(threading.Thread):
 
     def to_informer(self, payload):
         print("to_informer")
+        self._message_id += 1
         payload['timestamp'] = int((time.time())) + self._utc_offset
         print(payload)
         resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
@@ -1596,6 +1599,7 @@ class App(threading.Thread):
 
     def to_driver(self, payload):
         print("to_driver")
+        self._message_id += 1
         payload['timestamp'] = int((time.time())) + self._utc_offset
         print(payload)
         resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
@@ -1697,7 +1701,7 @@ class App(threading.Thread):
             # client.publish("test", "validate")
             loop_flag = 1
 
-            #self.check_driver_registration()
+            self.check_driver_registration()
 
             i = 0
             # counter=0

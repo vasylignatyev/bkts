@@ -26,7 +26,7 @@ import os
 stop_distance = 0.000547559129223524
 driver_registered = False
 
-RECHECK_MESSAGES = 5	# how often (in sec) recheck new messages
+RECHECK_MESSAGES = 3	# how often (in sec) recheck new messages
 current_station = None
 current_round = None
 current_direction = None
@@ -1272,8 +1272,8 @@ def get_route(visible, current_round, direction):
             diff = None
             cursor = db.execute(sql)
             for row in cursor:
-                print(row)
-                print("append stop 7")
+                #print(row)
+                #print("append stop 7")
                 '''
                 if row[4] > -1000:
                     #diff = (-1) * int(row[4]/60)
@@ -1281,21 +1281,21 @@ def get_route(visible, current_round, direction):
                     diff=0
                     set_sb_delay(diff)
                 '''
-                print("append stop 6")
+                #print("append stop 6")
                 schedule_line = dict(
                     name=row[1],
                     schedule= int(row[3]/60) if row[3]>0 else row[3],
                     lag= int(row[4]) if row[4] < -1000 else (-1)*int(row[4]/60),
                     #lag= -2000,
                 )
-                print("append stop 2")
+                #print("append stop 2")
                 tab_body.append(schedule_line)
-                print("append stop 3")
+                #print("append stop 3")
             cursor.close()
-            print("append stop 4")
+            #print("append stop 4")
             if len(tab_body) == 0:
                 tab_body = [dict(name="", schedule=0, lag=0), ]
-            print("append stop 5")
+            #print("append stop 5")
             return tab_body
 
         except KeyboardInterrupt as e:
@@ -1788,10 +1788,11 @@ def local_exec():  # every 1sec
         mqtt_client.publish("t_bkts", resultJSON)
 
     # recheck messages & redraw new (every RECHECK_MESSAGES seconds)
-'''
+
     if (demo_cnt % RECHECK_MESSAGES) == 0:
+        print("check_new_messages")
         check_new_messages()
-'''
+
 
 
 '''
