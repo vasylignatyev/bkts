@@ -39,15 +39,18 @@ class App(threading.Thread):
         super(App, self).__init__()
 
         #threading.Thread.__init__(self)
-        self.start()
+
 
         #Constants
 
         self.DATABASE='/opt/telecard/bkts.db'
-        self.DRIVERJSON='/opt/telecard/driver.json'
-        self.ROUTEJSON='/opt/telecard/route.json'
-        self.VEHICLEJSON='/opt/telecard/vehicle.json'
-        self.SESSIONJSON='/opt/telecard/session.json'
+        self.DRIVER_JSON= '/opt/telecard/driver.json'
+        self.ROUTE_JSON= '/opt/telecard/route.json'
+        self.VEHICLE_JSON= '/opt/telecard/vehicle.json'
+        self.SESSION_JSON= '/opt/telecard/session.json'
+        self.TRACE_JSON= '/opt/telecard/trace.json'
+        self.POINTS_JSON= '/opt/telecard/points.json'
+        self.SCHEDULE_JSON= '/opt/telecard/schedule.json'
 
         self.token = None
         self.routeName = None
@@ -76,13 +79,20 @@ class App(threading.Thread):
         self._message_id = 1
         self.vehicle_type_short = None
 
+
+
+
+        #GPS BLOCK
+        self._gps_array=None
+        self._gps_idx=0
+        self
         self.latitude = 0.0
         self.longitude = 0.0
         #stop_distance = 0.000547559129223524
         #self.stop_distance = 0.000000299820999996023854551154978576
         self.stop_distance = 0.0000002
 
-        self.validator_array = []
+        self.validator_dict = {}
 
         self.current_point_name = None
         self.current_point_id = None
@@ -106,26 +116,24 @@ class App(threading.Thread):
         self.vehicle_type_ukr = None
         self.vehicle_type_eng = None
 
-        #self._tz = pytz.timezone('Europe/Kiev')
+        # self._tz = pytz.timezone('Europe/Kiev')
         self._dst = time.daylight and time.localtime().tm_isdst > 0
         self._utc_offset = - (time.altzone if self._dst else time.timezone)
 
         self.db_init()
 
-        #delete service files
+        print("delete service files")
         try:
-            os.remove(self.DRIVERJSON)
+            os.remove(self.DRIVER_JSON)
         except Exception as e:
-            print(e)
+            print("Can`t delete {}".format(self.DRIVER_JSON))
         try:
-            os.remove(self.VEHICLEJSON)
+            os.remove(self.VEHICLE_JSON)
         except Exception as e:
-            print(e)
+            print("Can`t delete {}".format(self.VEHICLE_JSON))
 
-    def on_thread(self, function, *args, **kwargs):
-        self.q.put((function, args, kwargs))
+        self.start()
 
-    #@staticmethod
     def dist(self, long1, lat1, long2, lat2):
         x = long1 - long2
         y = lat1 - lat2
@@ -133,11 +141,11 @@ class App(threading.Thread):
 
     def db_init(self):
         print("db_init")
-        #UDF DECLARATION
-        #self._db.create_function("dist", 4, self.dist)
+        # UDF DECLARATION
+        # self._db.create_function("dist", 4, self.dist)
 
         self.db().execute("DROP TABLE IF EXISTS point")
-        #Create point
+        # Create point
         sql = "CREATE TABLE IF NOT EXISTS point " \
               "(`id` INTEGER," \
               "`name` TEXT,`order` INTEGER," \
@@ -348,7 +356,10 @@ class App(threading.Thread):
         return self.vehicle_type_eng.get(route_prefix[0:3], "№")
 
     def get_messages(self):
-        #print("get_messages")
+        # print("get_messages")
+        if self.driverId is None:
+            return False
+
         db = sqlite3.connect(self.DATABASE)
         c = db.cursor()
         sql="SELECT MAX(`id`) FROM message"
@@ -356,13 +367,13 @@ class App(threading.Thread):
         row = c.fetchone()
 
         last_message_id = 0 if row[0] is None else row[0]
-        #print("Last messsge Id: " + str(last_message_id) )
+        # print("Last messsge Id: " + str(last_message_id) )
         c.close()
 
         url = 'http://st.atelecom.biz/mob/v1/message/{}/{}'.format( self.driverId, last_message_id)
-        #print("URL: " + url)
+        # print("URL: " + url)
         r = requests.get(url, headers=self.get_auth_header())
-        #print("Status code: " + str(r.status_code))
+        # print("Status code: " + str(r.status_code))
         if r.status_code == requests.codes.ok:
             response = r.json()
             for message in response:
@@ -373,13 +384,14 @@ class App(threading.Thread):
                 created_at = message.get('created_at')
 
                 sql = "INSERT OR IGNORE INTO message (`id`,`title`,`text`,`created_at`) VALUES ('{}','{}','{}','{}')".format(m_id,title, text, created_at)
-                #print(sql)
+                # print(sql)
                 db.execute(sql)
             db.commit()
-            #message_cursor = db.execute("SELECT `title`,`text` FROM message")
-            #print(messageCursor)
+            # message_cursor = db.execute("SELECT `title`,`text` FROM message")
+            # print(messageCursor)
         db.close()
-    #@staticmethod
+
+    # @staticmethod
     def t_diff(self, ts1, ts2, unsigned=True):
         t1 = datetime.datetime.strptime(ts1, '%H:%M:%S').time()
         t2 = datetime.datetime.strptime(ts2, '%H:%M:%S').time()
@@ -405,14 +417,14 @@ class App(threading.Thread):
             points = response.get('points', None)
             print("Points count: {}".format(str(len(points))))
 
-            with open('points.json', 'w') as outfile:
+            with open(self.POINTS_JSON, 'w') as outfile:
                 json.dump(points, outfile)
             outfile.close()
 
             schedule = response.get('schedule', None)
             print("schedule count: {}".format(str(len(schedule))))
 
-            with open('schedule.json', 'w') as outfile:
+            with open(self.SCHEDULE_JSON, 'w') as outfile:
                 json.dump(schedule, outfile)
             outfile.close()
 
@@ -425,7 +437,7 @@ class App(threading.Thread):
             fields = '`,`'.join(map(str, point.keys()))
             values = '\',\''.join(map(str, point.values())).replace('\'None\'', 'NULL', 10)
             sql = "INSERT OR IGNORE INTO point (`{}`) VALUES (\'{}\')".format(fields, values)
-            #print(sql)
+            # print(sql)
             self.db_exec(sql)
 
         sql = "DELETE FROM schedule"
@@ -519,13 +531,13 @@ class App(threading.Thread):
         print("on_start_leg")
 
         self._direction = 1
+        self._gps_idx = 0
+
         self.new_search = True
         self.search_point('ст. м. Харківська')
 
         req_dict['round'] = self._round
         req_dict['direction'] = self._direction
-
-        #search for last stop on route
 
         sql = "SELECT p.name, p.id " \
               "FROM schedule s " \
@@ -558,29 +570,16 @@ class App(threading.Thread):
         r = requests.delete(url, headers=headers, json=payload)
         print(r)
 
-    def on_gps_coordinates(self, reqDict):
-        #print("Call for: on_gps_coordinates")
-        args = ('latitude', 'longitude')
-        error = ""
-        try:
-            for arg in args:
-                vars(self)[arg] = reqDict[arg]
-        except KeyError as e:
-            error += " Required attribute: '{}'.".format(arg)
+    def new_gps_coordinates(self):
 
-        if len(error) > 0:
-            print(error)
-            return False
-
-        lat = float(reqDict['latitude'])
-        lon = float(reqDict['longitude'])
         if self._direction is None or self._round is None:
             return False
+
         sql = "SELECT p.`name`, p.`id`, s.id, s.`time` FROM schedule s "\
               "INNER JOIN point p ON s.station_id = p.id AND s.`direction`= p.`direction` "\
               "WHERE p.`type`=1 AND s.`direction`={dir} AND s.`round`={r} AND dist({lat}, {lon}, `latitude` ,`longitude`) < {dist}"
-        sql = sql.format(lat=lat, lon=lon, dist=self.stop_distance, dir=self._direction, r=self._round)
-        #print(sql)
+        sql = sql.format(lat=self.latitude, lon=self.longitude, dist=self.stop_distance, dir=self._direction, r=self._round)
+        # print(sql)
         cursor = self.db_exec(sql)
         station = cursor.fetchone()
         if type(station).__name__ == "tuple" and station[0] is not None:
@@ -600,7 +599,6 @@ class App(threading.Thread):
 
                 if station[1] == self.last_point_id:
                     self.change_direction()
-
         else:
             if self.current_point_name is not None:
                 self.on_departure(self.current_point_name)
@@ -625,15 +623,20 @@ class App(threading.Thread):
         self.to_driver(req_dict)
 
     def check_validators(self):
-        #print("check_validators")
-        if self.validator_array is not None:
-            #print(type(self.validator_array))
-            for validator in self.validator_array:
+        # print("check_validators")
+        if self.validator_dict is not None:
+            # print(self.validator_dict)
+            for mac in self.validator_dict:
+                validator = self.validator_dict[mac]
                 mac = validator.get('mac', None)
                 if mac is not None:
+
                     if validator['cnt'] > 0:
-                        #print("VALIDATOR: {} is not in order".format(mac))
-                        pass
+                        # print("VALIDATOR: {} is not in order".format(mac))
+                        validator['in_order'] = False
+                    else:
+                        validator['in_order'] = True
+
                     validator['cnt'] = validator['cnt'] + 1
                     payload = dict(
                             type=1,
@@ -892,7 +895,7 @@ class App(threading.Thread):
 
     # Validator regisration event
     def on_validator_reg_cb(self, reqDict):
-        print('Call: registrationCB')
+        print('on_validator_reg_cb')
 
         args = ('type', 'validator_id', 'message_id', 'status', 'sw_version', 'hw_version', 'timestamp')
         try:
@@ -902,19 +905,21 @@ class App(threading.Thread):
             print("Required attribute: ", e)
             return False
 
+        mac = reqDict.get('validator_id')
+
         validator = dict(
             type= reqDict.get('type'),
-            mac= reqDict.get('validator_id'),
+            mac=mac,
             status= reqDict.get('status'),
             sw_version= reqDict.get('sw_version'),
             hw_version= reqDict.get('hw_version'),
             last_status=reqDict.get('status'),
+            in_order=True,
             cnt=0,
         )
-        print(validator)
 
-        self.validator_array.append(validator)
-        print(self.validator_array)
+        self.validator_dict[mac] = validator
+        print(self.validator_dict)
 
         headers = dict(AUTHORIZATION='Bearer {}'.format(self.validator_id))
         payload = dict(
@@ -923,28 +928,40 @@ class App(threading.Thread):
             status=self.status,
         )
         # Send request
-        print('Sending request ...')
-        print(headers)
-        print(payload)
-        r = requests.put('http://st.atelecom.biz/bkts/api/registration', headers=headers, json=payload)
-        print("status_code: {}".format(str(r.status_code)))
-        #if r.status_code == requests.codes.ok:
-        if r.status_code == r.status_code:
-            #response = r.json()
-            #print("RESPONSE {}".format( str(r)))
-            #print(response)
-            timestamp = int(time.time())
+        print('****************** Request Validator registartion ***********************')
+        url='http://st.atelecom.biz/bkts/api/registration'
+        r = requests.put(url, headers=headers, json=payload)
+        print("status code: {}".format(str(r.status_code)))
+        if r.status_code == 200:
             result = dict(
                 type=self.type,
                 validator_id=self.validator_id,
                 message_id=self.message_id,
-                timestamp=timestamp,
+                timestamp=datetime.datetime.now().timestamp(),
                 success=0,
                 route='',
                 price=0,
             )
             self.to_validator(result)
-
+        else:
+            print("!!!!!!!!!!!!!!!!! Registration failed !!!!!!!!!!!!!!!!!!")
+            print("PUT url: {}".format(url))
+            print("heders: {}".format(str(headers)))
+            print("payload: {}".format(str(payload)))
+            print("Validator {validator_id} registration failed.".format(validator_id=self.validator_id))
+            print("RESPONSE {}".format( str(r)))
+            '''
+            result = dict(
+                type=self.type,
+                validator_id=self.validator_id,
+                message_id=self.message_id,
+                timestamp=datetime.datetime.now().timestamp(),
+                success=0,
+                route='',
+                price=0,
+            )
+            self.to_validator(result)
+            '''
         if self._driver_on_route:
             self.goto_payment_mode()
         else:
@@ -959,13 +976,11 @@ class App(threading.Thread):
         print(payloadOBJ)
 
         current_validator_id = payloadOBJ.get("validator_id", None)
-
-        for validator in self.validator_array:
-            validator_id = validator.get("mac", None)
-            print("current_validator_id {}".format(current_validator_id))
-            print("validator_id {}".format(validator_id))
-            if current_validator_id is not None and current_validator_id == validator_id:
-                validator['cnt'] = 0
+        try:
+            if current_validator_id is not None:
+                self.validator_dict[current_validator_id]['cnt'] = 0
+        except KeyError:
+            print("validator-id {} unknown".format(current_validator_id))
 
     def conductorCB(self, payloadOBJ):
         print("Call for conductorCB")
@@ -975,67 +990,101 @@ class App(threading.Thread):
 
     def check_driver_registration(self):
         print("check_driver_registration")
-        driver = None
-        try:
-            with open(self.DRIVERJSON, 'r') as infile:
-                driver = json.load(infile)
-                infile.close()
-        except Exception as e:
-            print(e)
 
-        route = None
-        try:
-            with open(self.ROUTEJSON, 'r') as infile:
-                route = json.load(infile)
-                infile.close()
-        except Exception as e:
-            print(e)
+        self._driver_on_route = False
 
-        vehicle = None
-        try:
-            with open(self.VEHICLEJSON, 'r') as infile:
-                vehicle = json.load(infile)
-                infile.close()
-        except Exception as e:
-            print(e)
+        if self.get_driver_saved_info() is True:
+            if self.get_route_saved_info() is True:
+                if self.get_vehicle_saved_info() is True:
+                    if self.get_session_saved_info() is True:
+                        self._driver_on_route = True
 
-        session = None
-        try:
-            with open(self.SESSIONJSON, 'r') as infile:
-                session = json.load(infile)
-                infile.close()
-        except Exception as e:
-            print(e)
-
-        if session is not None and route is not None and driver is not None and vehicle is not None:
-            print(vehicle)
-            self.token = session.get('token', None)
-
-            self.route_id = route.get('id', None)
-            self.routeName = route.get('name', None)
-            print(" ROUTE NAME: {}".format(self.routeName))
-            self.routeGuid = route.get('guid', None)
-            print("routeGuid: {}".format(str(self.routeGuid)))
-            self.rate = route.get('rate', None)
-
-            self.driverId = driver.get('id', None)
-            self.driverName = driver.get('name', None)
-
-            print(self.routeGuid)
-            print(self.routeName)
-            self.route_name = self.get_vehicle_type_ukr(self.routeGuid) + str(self.routeName)
-            self.vehicle_id = vehicle.get('id', None)
-
-            print("Vehicle ID: " + str(self.vehicle_id))
+        if self._driver_on_route:
             # GET ROUTE AND SCHEDULE
             self.get_route_info(self.driverId)
             self.get_messages()
-            self._driver_on_route = True
-
             # go to payment mode
             self.goto_payment_mode()
         else:
             self.goto_registration_mode()
+
+    def get_session_saved_info(self):
+        try:
+            with open(self.SESSION_JSON, 'r') as infile:
+                session = json.load(infile)
+                infile.close()
+        except Exception as e:
+            print(e)
+            return False
+        try:
+            self.token = session['token']
+            return False if self.token is None else True
+        except KeyError as e:
+            print(e)
+            return False
+
+    def get_driver_saved_info(self):
+        print("get_driver_saved_info")
+
+        try:
+            with open(self.DRIVER_JSON, 'r') as infile:
+                driver = json.load(infile)
+                infile.close()
+        except Exception as e:
+            print(e)
+            return False
+        try:
+            self.driverId = ['id']
+            self.driverName = driver['name']
+        except KeyError as e:
+            print(e)
+            return False
+
+    def get_route_saved_info(self):
+        print("get_route_saved_info")
+        try:
+            with open(self.ROUTE_JSON, 'r') as infile:
+                route = json.load(infile)
+                infile.close()
+        except Exception as e:
+            print(e)
+            return False
+        try:
+            self.route_id = route['id']
+
+            self.routeName = route['name']
+            print("Route Name {}".format(str(self.routeName)))
+
+            self.routeGuid = route['guid']
+            print("Route Guid: {}".format(str(self.routeGuid)))
+
+            self.rate = route['rate']
+
+            self.route_name = self.get_vehicle_type_ukr(self.routeGuid) + str(self.routeName)
+
+            return True
+
+        except KeyError as e:
+            print(e)
+            return False
+
+    def get_vehicle_saved_info(self):
+        try:
+            with open(self.VEHICLE_JSON, 'r') as infile:
+                vehicle = json.load(infile)
+                infile.close()
+        except Exception as e:
+            print(e)
+            return False
+        try:
+            self.vehicle_id = vehicle['id']
+            if self.vehicle_id is None:
+                return False
+            print("Vehicle ID: " + str(self.vehicle_id))
+            return True
+        except KeyError as e:
+            print(e)
+            return False
 
     def goto_refound_mode(self):
         print("go_to_refound_mode")
@@ -1062,7 +1111,7 @@ class App(threading.Thread):
         self.to_validator(payload)
 
     def goto_registration_mode(self):
-        print("go_to_registration_mode")
+        print("goto_registration_mode")
         payload = dict(
             type=42,
             timestamp=int(datetime.datetime.now().timestamp()),
@@ -1085,11 +1134,14 @@ class App(threading.Thread):
         self.to_validator(payload)
 
     def driver_registration(self, code):
-        print("driver_registration")
+        print("*************** driver_registration *****************")
         payload = dict(
             code=code
         )
-        r = requests.post('http://st.atelecom.biz/mob/v1/auth', json=payload)
+        url = 'http://st.atelecom.biz/mob/v1/auth'
+        print("POST :" + url)
+        print(payload)
+        r = requests.post(url, json=payload)
         print("status: " + str(r.status_code))
 
         if r.status_code == 404:
@@ -1102,12 +1154,10 @@ class App(threading.Thread):
             print(response)
             driver = response.get('model', None)
             route = response.get('route', None)
-            #print(route)
             vehicle = response.get('vehicle', None)
-            ##Open
             try:
                 print("OPEN: " + "self.DRIVERJSON")
-                with open(self.DRIVERJSON, 'w') as outfile:
+                with open(self.DRIVER_JSON, 'w') as outfile:
                     json.dump(driver, outfile)
                 outfile.close()
             except Exception as e:
@@ -1117,7 +1167,7 @@ class App(threading.Thread):
             if route.get("id", None) is not None:
                 try:
                     print("OPEN: " + "self.ROUTEJSON")
-                    with open(self.ROUTEJSON, 'r') as infile:
+                    with open(self.ROUTE_JSON, 'r') as infile:
                         old_route_info = json.load(infile)
                         old_updated_at = int(old_route_info.get("updated_at", None))
                         new_updated_at = int(route.get("updated_at", None))
@@ -1127,7 +1177,7 @@ class App(threading.Thread):
                             self._actual_route_info = False
                     infile.close()
                     print("OPEN: " + "self.ROUTEJSON")
-                    with open(self.ROUTEJSON, 'w') as outfile:
+                    with open(self.ROUTE_JSON, 'w') as outfile:
                         print(route)
                         print("new_route_info updated_at:  {}".format(str(route.get("updated_at"))))
                         json.dump(route, outfile)
@@ -1143,34 +1193,34 @@ class App(threading.Thread):
                 raise MyError(self.getError('deny'))
 
 
-            #write vehicle info
+            # write vehicle info
             if vehicle.get("id", None) is not None:
                 self._driver_on_vehicle = True
                 try:
-                    with open(self.VEHICLEJSON, 'w') as outfile:
+                    with open(self.VEHICLE_JSON, 'w') as outfile:
                         json.dump(vehicle, outfile)
                     outfile.close()
-                    #print(vehicle)
+                    # print(vehicle)
                 except Exception as e:
                     print(e)
                 self._driver_on_route = True
             else:
                 self._driver_on_vehicle = False
                 try:
-                    os.remove(self.VEHICLEJSON)
+                    os.remove(self.VEHICLE_JSON)
                 except Exception as e:
                     print(e)
 
                 raise MyError(self.getError('deny'))
 
             self.token = response.get('token', None)
-            #self._driver_on_route = True
+            # self._driver_on_route = True
             session = dict(
                 code=code,
                 token=self.token,
             )
             try:
-                with open(self.SESSIONJSON, 'w') as outfile:
+                with open(self.SESSION_JSON, 'w') as outfile:
                     json.dump(session, outfile)
                 outfile.close()
             except Exception as e:
@@ -1190,11 +1240,7 @@ class App(threading.Thread):
             print("Vehicle ID: " + str(self.vehicle_id))
             # GET ROUTE AND SCHEDULE
             self.get_route_info(self.driverId)
-            self.get_messages()
-
-            #print(route)
-
-            #self._driverValidated = True
+            # self.get_messages()
 
             self.get_equipment()
             self.validator_registration()
@@ -1204,6 +1250,8 @@ class App(threading.Thread):
 
     def get_equipment(self):
         print("get_equipment")
+        if self.vehicle_id is None:
+            return False
 
         url = 'http://st.atelecom.biz/mob/v1/front/equipments/index?vehicle={}'.format(self.vehicle_id)
         print(url)
@@ -1215,8 +1263,8 @@ class App(threading.Thread):
     def validator_registration(self):
         print("validator_registration")
         #headers = dict(AUTHORIZATION='Bearer {}'.format(self._mac))
-        print(self.validator_array)
-        for validator in self.validator_array:
+        print(self.validator_dict)
+        for validator in self.validator_dict:
             print("VALIDATOR")
             print(validator)
             mac = validator.get('mac', None)
@@ -1534,7 +1582,7 @@ class App(threading.Thread):
             return False
 
     def on_message(self, client, userdata, message):
-        #print("on_message: {}".format(message.payload.decode("utf-8")))
+        print("on_message: {}".format(message.payload.decode("utf-8")))
         try:
             payload_dict = json.loads(message.payload.decode("utf-8"))
             #print("payload: {}".format(payload_dict))
@@ -1555,8 +1603,9 @@ class App(threading.Thread):
             elif _type == 101:
                 self.call_operator_cb(payload_dict)
             elif _type == 110:
-                self.on_gps_coordinates(payload_dict)
-            elif _type == 120:
+                pass
+                # self.new_gps_coordinates(payload_dict)
+            elif _type == 320:
                 self.on_start_leg(payload_dict)
             elif _type == 200:
                 print("Registartion From Informator")
@@ -1580,7 +1629,7 @@ class App(threading.Thread):
 
     # Send message to Validator
     def to_validator(self, payload):
-        print("to_validator1")
+        print("to_validator")
         self._message_id += 1
         payload['timestamp'] = int((time.time())) + self._utc_offset
         print(payload)
@@ -1598,10 +1647,9 @@ class App(threading.Thread):
         return
 
     def to_driver(self, payload):
-        print("to_driver")
-        self._message_id += 1
         payload['timestamp'] = int((time.time())) + self._utc_offset
-        print(payload)
+        # print("to_driver: {}".format(str(payload)))
+        self._message_id += 1
         resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
         self.client.publish("t_driver", resultJSON)
         return
@@ -1630,11 +1678,35 @@ class App(threading.Thread):
         print("on_message_new")
         print(msg.topic + " " + str(msg.qos) + " " + str(msg.payload))
 
+    def emmulate_gps(self):
+        # print("emmulate_gps")
+        if self._gps_array is None:
+            with open(self.TRACE_JSON, 'r') as infile:
+                self._gps_array = json.load(infile)
+                infile.close()
+            self._gps_idx=0
+
+        self._gps_idx += 1
+        if self._gps_idx >= self._gps_array.__len__():
+            self._gps_idx = 0
+
+        self.latitude,self.longitude  = self._gps_array[self._gps_idx]
+
+        payload = dict(
+            type=310,
+            latitude=self.latitude,
+            longitude=self.longitude,
+        )
+        self.to_driver(payload)
+
+        self.new_gps_coordinates()
+
     def local_exec(self):
-        pass
-        #print("local_exec")
-        self.get_messages()
-        #self.check_validators()
+        # print("local_exec")
+        self.check_validators()
+        self.emmulate_gps()
+        if self.token is not None:
+            self.get_messages()
 
     def check_internet(self):
         response = os.system("ping -c 1 " + "google.com")
@@ -1674,16 +1746,10 @@ class App(threading.Thread):
         print(r)
 
     def run(self):
-
         broker = "localhost"
         self.client = mqtt.Client("BKTS")  # create new instance
         self.client.on_connect = self.on_connect  # attach function to callback
         self.client.on_message = self.on_message  # attach function to callback
-        #self.client.on_message = self.on_message_new  # attach function to callback
-        #self.client.message_callback_add("t_informer", self.on_informer)
-        #self.client.message_callback_add("t_informer", self.on_informer)
-
-        #self.getRendomPoint()
 
         print("Connection to broker ", broker)
         try:
@@ -1695,24 +1761,17 @@ class App(threading.Thread):
         else:
             self.client.loop_start()
             self.client.subscribe("t_bkts")
-            #self.client.subscribe("#")
-            #self.client.message_callback_add("t_bkts", self.on_message)
-            #self.client.message_callback_add("t_informer", self.on_informer)
-            # client.publish("test", "validate")
-            loop_flag = 1
 
             self.check_driver_registration()
 
             i = 0
-            # counter=0
+            loop_flag = 1
             while loop_flag == 1:
                 time.sleep(1);
                 i += 1
-                if i > 5:
+                if i > 0:
                     i = 0
-                    if self.token is not None:
-                        self.local_exec()
-                        #self.onThread(self.local_exec())
+                    self.local_exec()
 
 
             self.client.loop_stop()
