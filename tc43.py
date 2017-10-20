@@ -1238,7 +1238,7 @@ def get_route(visible, current_round, direction):
                   "p.id " \
                   "from schedule s " \
                   "INNER JOIN point p  ON s.station_id = p.id AND s.`direction`= p.`direction` " \
-                  "WHERE s.round={round} AND s.`date`={wd} AND s.`direction`={direction} AND p.`type`=1 " \
+                  "WHERE s.round={round} AND s.`date`='{wd}' AND s.`direction`={direction} AND p.`type`=1 " \
                   "ORDER BY s.time".format(round=current_round, wd=wd, direction=direction)
             #print(sql)
             cursor = db.execute(sql)

@@ -861,6 +861,7 @@ class App(threading.Thread):
             if row is not None:
                 if current_stot_time is None:
                     current_stot_time = row[3]
+
                 stop_info[_property] = dict(
                     route_id=self.route_id,
                     stop_id=self.current_point_id,
@@ -886,6 +887,61 @@ class App(threading.Thread):
                     eta=0,
                 )
         self.to_ikts(stop_info)
+
+        sql = "SELECT p.`name`,p.`id`,s.`id`,s.`time`, s.`time`," \
+              "p.`now_audio_url`,p.`now_audio_dttm`,p.`now_video_url`,p.`now_video_dttm`, " \
+              "p.`future_audio_url`,p.`future_audio_dttm`,p.`future_video_url`,p.`future_video_dttm`,p.`direction` "\
+              "FROM `schedule` s " \
+              "INNER JOIN `point` p  ON s.`station_id` = p.`id` AND s.`direction`= p.`direction` " \
+              "WHERE s.`time` >= '{st}' AND s.`date`={wd} AND p.`type`=1 AND s.`direction`={dir} AND s.`round` = {r} " \
+              "ORDER BY s.time LIMIT 3"
+
+        sql = sql.format(wd=self.current_weekday, dir=self._direction, r=self._round, st=self.current_schedule_time)
+        print(sql)
+
+        cursor = self.db_exec(sql)
+
+        stop_info = dict(
+            type=221,
+            round=self._round,
+            direction=self._direction,
+        )
+        properties = ('curr_stop_info', 'next1_stop_info', 'next2_stop_info', 'next3_stop_info')
+        current_stot_time = None
+
+        next_stop_name = None
+        i=0
+        for _property in properties:
+            i += 1
+            row = cursor.fetchone()
+            if row is not None:
+                if current_stot_time is None:
+                    current_stot_time = row[3]
+
+                stop_info[_property] = dict(
+                    route_id=self.route_id,
+                    stop_id=self.current_point_id,
+                    ukr=row[0],
+                    eta=self.t_diff(row[3], current_stot_time),
+                    now_audio_url=row[5],
+                    now_audio_dttm=row[6],
+                    now_video_url=row[7],
+                    now_video_dttm=row[8],
+                    future_audio_url=row[9],
+                    future_audio_dttm=row[10],
+                    future_video_url=row[11],
+                    future_video_dttm=row[12],
+                    direction=row[13],
+                )
+                if i == 2:
+                    next_stop_name = row[0]
+            else:
+                stop_info[_property] = dict(
+                    route_id=self.route_id,
+                    stop_id=self.current_point_id,
+                    ukr="",
+                    eta=0,
+                )
         self.to_driver(stop_info)
 
         if next_stop_name is not None:
@@ -1232,6 +1288,17 @@ class App(threading.Thread):
         )
         self.to_validator(payload)
 
+    def goto_check_mode(self):
+        print("goto_waiting_mode")
+        payload = dict(
+            type=44,
+            timestamp=int(datetime.datetime.now().timestamp()),
+            ukr="",
+            eng="",
+            route=self.routeGuid,
+        )
+        self.to_validator(payload)
+
     def driver_registration(self, code, reqDict):
         print("*************** driver_registration *****************")
         payload = dict(
@@ -1371,23 +1438,37 @@ class App(threading.Thread):
             print("+++++++++++++++++ QUIPMENT +++++++++++++++++++++++")
             print(self._equipment_list)
 
+    def send_equipment_status(self, status, mac ):
+        payload = dict(
+            device_mac_address=mac,
+            device_serial_number=mac,
+            code=status,
+            staff_id=self.driverId,
+            vehicle_id=self.vehicle_id,
+            route_id=self.route_id,
+            status=status,
+            mac=mac,
+            location=dict(
+                lat=self.latitude,
+                lng=self.longitude,
+                timestamp=int(datetime.datetime.now().timestamp())
+            )
+        )
+        # Send request
+        url = 'http://st.atelecom.biz/mob/v1/front/alarms/status'
+        print("Sending request to '{}'".format(url))
+        print("Payload: {}".format(payload))
+        r = requests.post(url, json=payload, headers=self.get_auth_header())
+        print('RESPONCE: {}'.format(str(r)))
+
     def get_equipment_status(self):
         print("get_equipment_status")
         self._message_id = self._message_id + 1
         if self._equipment_list is not None:
-            payload = dict(
-                type=1,
-                timestamp=int(datetime.datetime.now().timestamp()),
-                # validator_id=mac,
-            )
-
             for equipment in self._equipment_list:
                 _type = int(equipment.get('type', 0))
                 mac = equipment.get('mac_address', None)
-
-                self.to_validator(payload)
-                print(equipment)
-
+                # print(equipment)
                 if mac is not None:
                     if _type is 1:
                         # BKTS
@@ -1397,128 +1478,33 @@ class App(threading.Thread):
                         equipment['status'] = -1
                         cnt = equipment.get('cnt', 0)
                         if cnt > 0: # "not in order"
-                            print("mac {} not in order.".format(mac))
-
+                            print("Validator {} not in order.".format(mac))
                             if equipment.get('prev_status') != 1:
                                 print("+++++++++++++++++++++++++++++++++  Send status update  ++++++++++++++++++++++++++++++++")
-                                payload = dict(
-                                    device_mac_address=mac,
-                                    device_serial_number=mac,
-                                    code=500,
-                                    staff_id=self.driverId,
-                                    vehicle_id=self.vehicle_id,
-                                    route_id=self.route_id,
-                                    # sw_version=validator.get('sw_version', None),
-                                    # hw_version=validator.get('hw_version', None),
-                                    status=500,
-                                    mac=mac,
-                                    location=dict(
-                                        lat=self.latitude,
-                                        lng=self.longitude,
-                                        timestamp=int(datetime.datetime.now().timestamp())
-                                    )
-                                )
-                                # Send request
-                                url = 'http://st.atelecom.biz/mob/v1/front/alarms/status'
-                                print("Sending request to '{}'".format(url))
-                                print("Payload: {}".format(payload))
-                                r = requests.post(url, json=payload, headers=self.get_auth_header())
-                                print('RESPONCE: {}'.format(str(r)))
-
+                                self.send_equipment_status(500,mac)
                             equipment['prev_status'] = 1
                         else:
                             equipment['cnt'] = cnt + 1
-
                             if equipment.get('prev_status') != 0:
-                                # Send status update
-                                payload = dict(
-                                    device_mac_address=mac,
-                                    device_serial_number=mac,
-                                    code=200,
-                                    staff_id=self.driverId,
-                                    vehicle_id=self.vehicle_id,
-                                    route_id=self.route_id,
-                                    # sw_version=validator.get('sw_version', None),
-                                    # hw_version=validator.get('hw_version', None),
-                                    status=200,
-                                    mac=mac,
-                                    location=dict(
-                                        lat=self.latitude,
-                                        lng=self.longitude,
-                                        timestamp=int(datetime.datetime.now().timestamp())
-                                    )
-                                )
-                                # Send request
-                                url = 'http://st.atelecom.biz/mob/v1/front/alarms/status'
-                                print("Sending request to '{}'".format(url))
-                                print("Payload: {}".format(payload))
-                                r = requests.post(url, json=payload, headers=self.get_auth_header())
-                                print('RESPONCE: {}'.format(str(r)))
-
+                                print("+++++++++++++++++++++++++++++++++  Send status update  ++++++++++++++++++++++++++++++++")
+                                self.send_equipment_status(200, mac)
                             equipment['prev_status'] = 0
 
                     elif _type is 4:
                         equipment['status'] = -1
                         cnt = equipment.get('cnt', 0)
                         if cnt > 0:  # "not in order"
-                            print("mac {} not in order.".format(mac))
+                            print("IKTS {} not in order.".format(mac))
 
                             if equipment.get('prev_status') != 1:
                                 print("+++++++++++++++++++++++++++  Send status update  +++++++++++++++++++++++++++++")
-                                payload = dict(
-                                    device_mac_address=mac,
-                                    device_serial_number=mac,
-                                    code=500,
-                                    staff_id=self.driverId,
-                                    vehicle_id=self.vehicle_id,
-                                    route_id=self.route_id,
-                                    # sw_version=validator.get('sw_version', None),
-                                    # hw_version=validator.get('hw_version', None),
-                                    status=500,
-                                    mac=mac,
-                                    location=dict(
-                                        lat=self.latitude,
-                                        lng=self.longitude,
-                                        timestamp=int(datetime.datetime.now().timestamp())
-                                    )
-                                )
-                                # Send request
-                                url = 'http://st.atelecom.biz/mob/v1/front/alarms/status'
-                                print("Sending request to '{}'".format(url))
-                                print("Payload: {}".format(payload))
-                                r = requests.post(url, json=payload, headers=self.get_auth_header())
-                                print('RESPONCE: {}'.format(str(r)))
-
+                                self.send_equipment_status(500, mac)
                             equipment['prev_status'] = 1
                         else:
                             equipment['cnt'] = cnt + 1
-
                             if equipment.get('prev_status') != 0:
                                 print("+++++++++++++++++++++++++++  Send status update  +++++++++++++++++++++++++++++")
-                                payload = dict(
-                                    device_mac_address=mac,
-                                    device_serial_number=mac,
-                                    code=200,
-                                    staff_id=self.driverId,
-                                    vehicle_id=self.vehicle_id,
-                                    route_id=self.route_id,
-                                    # sw_version=validator.get('sw_version', None),
-                                    # hw_version=validator.get('hw_version', None),
-                                    status=200,
-                                    mac=mac,
-                                    location=dict(
-                                        lat=self.latitude,
-                                        lng=self.longitude,
-                                        timestamp=int(datetime.datetime.now().timestamp())
-                                    )
-                                )
-                                # Send request
-                                url = 'http://st.atelecom.biz/mob/v1/front/alarms/status'
-                                print("Sending request to '{}'".format(url))
-                                print("Payload: {}".format(payload))
-                                r = requests.post(url, json=payload, headers=self.get_auth_header())
-                                print('RESPONCE: {}'.format(str(r)))
-
+                                self.send_equipment_status(200, mac)
                             equipment['prev_status'] = 0
                         payload = dict(
                             type=202,
@@ -1528,16 +1514,20 @@ class App(threading.Thread):
                         self.to_ikts(payload)
                     else:
                         print( "Unknown equipment type: {}".format(_type) )
+            payload = dict(
+                type=1,
+                timestamp=int(datetime.datetime.now().timestamp()),
+            )
+            self.to_validator(payload)
 
 
     def validator_registration(self):
         print("validator_registration")
-        #headers = dict(AUTHORIZATION='Bearer {}'.format(self._mac))
         print(self.validator_dict)
         for validator in self.validator_dict:
-            print("VALIDATOR")
-            print(validator)
-            mac = validator.get('mac', None)
+            print("VALIDATOR: {} registration".format(validator))
+            # mac = validator.get('mac', None)
+            mac = validator
             payload = dict(
                 device_mac_address=mac,
                 device_serial_number=mac,
@@ -1545,8 +1535,8 @@ class App(threading.Thread):
                 staff_id=self.driverId,
                 vehicle_id=self.vehicle_id,
                 route_id=self.route_id,
-                sw_version=validator.get('sw_version', None),
-                hw_version=validator.get('hw_version', None),
+                sw_version=self.validator_dict[mac].get('sw_version', None),
+                hw_version=self.validator_dict[mac].get('hw_version', None),
                 status=200,
                 mac=mac,
                 location=dict(
@@ -1892,9 +1882,10 @@ class App(threading.Thread):
     # Send message to Validator
     def to_validator(self, payload):
         print("to_validator")
+        print(payload)
         self._message_id += 1
         payload['timestamp'] = int((time.time())) + self._utc_offset
-        # print(payload)
+        print(payload)
         resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
         self.client.publish("t_validator", resultJSON)
         return
