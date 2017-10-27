@@ -141,6 +141,8 @@ class App(threading.Thread):
         #UDF DECLARATION
         #self._db.create_function("dist", 4, self.dist)
 
+
+
         self.db().execute("DROP TABLE IF EXISTS point")
         #Create point
         sql = "CREATE TABLE IF NOT EXISTS point " \
@@ -212,6 +214,15 @@ class App(threading.Thread):
               "`new` INTEGER DEFAULT 1," \
               "`created_at` INTEGER)"
         self.db().execute(sql)
+
+        # CREATE equipment
+        sql = "CREATE TABLE IF NOT EXISTS equipment " \
+              "(`mac` TEXT primary key," \
+              "`serial_number` TEXT," \
+              "`type` INTEGER," \
+              "`i_vehicle` INTEGER DEFAULT 0,"
+        self.db().execute(sql)
+
         self.db().commit()
 
         #DISCONNECT
@@ -1437,6 +1448,7 @@ class App(threading.Thread):
             self._equipment_list = r.json()
             print("+++++++++++++++++ QUIPMENT +++++++++++++++++++++++")
             print(self._equipment_list)
+            # sql="INSERT"
 
     def send_equipment_status(self, status, mac ):
         payload = dict(

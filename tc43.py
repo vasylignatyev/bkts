@@ -22,6 +22,7 @@ from gps3.agps3threaded import AGPS3mechanism
 import paho.mqtt.client as mqtt
 import os
 
+DATABASE = "/opt/telecard/bkts.db"
 
 stop_distance = 0.000547559129223524
 driver_registered = False
@@ -88,7 +89,6 @@ tab_data['route'] = [
     dict(item="Оновлення", desc="06/08/2017")
 ]
 
-
 def dist(long1, lat1, long2, lat2):
     x = long1 - long2
     y = lat1 - lat2
@@ -108,7 +108,7 @@ def t_diff(ts1, ts2, unsigned=True):
 
 # print(dist(50.433940, 30.458079, 50.433601, 30.458509))
 
-db = sqlite3.connect('bkts.db')
+db = sqlite3.connect(DATABASE)
 db.create_function("dist", 4, dist)
 
 #def ping_devices(targets):
@@ -199,7 +199,7 @@ def on_arrival(payload_dict):
     print("on_arrival")
     print(payload_dict)
 
-    db = sqlite3.connect('bkts.db')
+    db = sqlite3.connect(DATABASE)
     db.create_function("t_diff", 2, t_diff)
     if 'difference' in payload_dict and 'schedule_id' in payload_dict:
         pass
@@ -974,9 +974,9 @@ SPLASH = dict(ico=IMAGE_DIR+"card03.jpg", text="Очікування<br>реєс
 SB_HEIGHT = 48
 
 
-DRIVER_JSON = "driver.json"
-VEHICLE_JSON = "vehicle.json"
-ROUTE_JSON = "route.json"
+DRIVER_JSON = "/opt/telecard/driver.json"
+VEHICLE_JSON = "/opt/telecard/vehicle.json"
+ROUTE_JSON = "/opt/telecard/route.json"
 
 # misc settings
 DEFAULT_TAB = 0  # 0 - Трансп.засіб
@@ -1221,7 +1221,7 @@ def get_route(visible, current_round, direction):
     print("get_route")
     if visible and current_round is not None and direction is not None:
         try:
-            db = sqlite3.connect('bkts.db')
+            db = sqlite3.connect(DATABASE)
 
             tab_body = []
 
