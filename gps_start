@@ -1,0 +1,5 @@
+:
+
+/opt/telecard/gps_orig.py >/opt/telecard/gps_orig.log 2>&1 &
+/opt/telecard/mqtt_gps.py >/opt/telecard/mqtt_gps.log 2>&1 &
+

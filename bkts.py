@@ -20,7 +20,7 @@ def main():
 
 
 class MyError(Exception):
-    def __init__(self, _error: object) -> object:
+    def __init__(self, _error: object)->object:
         #print("Inside MyError")
         #print(_error)
         self.message = _error.get('error')
@@ -150,7 +150,8 @@ class App(threading.Thread):
         #Create point
         sql = "CREATE TABLE IF NOT EXISTS point " \
               "(`id` INTEGER," \
-              "`name` TEXT,`order` INTEGER," \
+              "`name` TEXT," \
+              "`order` INTEGER," \
               "`direction` INTEGER," \
               "`type` INTEGER," \
               "`entrance` INTEGER," \
@@ -371,7 +372,7 @@ class App(threading.Thread):
         return self.vehicle_type_eng.get(route_prefix[0:3], "№")
 
     def get_messages(self):
-        # print("get_messages")
+        print("get_messages")
         if self.driverId is None:
             return False
 
@@ -382,27 +383,33 @@ class App(threading.Thread):
         c.close()
 
         url = 'http://st.atelecom.biz/mob/v1/message/{}/{}'.format( self.driverId, last_message_id)
+        print("url: {}  {}".format(url, self.get_auth_header() ))
         r = requests.get(url, headers=self.get_auth_header())
         if r.status_code == requests.codes.ok:
+            print(r)
             response = r.json()
-            insert = "INSERT OR IGNORE INTO message (`id`,`title`,`text`,`created_at`) " \
-                     "VALUES ('{id}','{title}','{text}','{created_at}')"
+            print(response)
+            insert = "INSERT OR IGNORE INTO message (`id`,`title`,`text`,`created_at`) VALUES (?,?,?,?)"
+
+            print("last_message_id {}".format(last_message_id))
             for message in response:
-                m_id = message.get('id')
+                print(message)
+                m_id = int(message.get('id'))
                 title = message.get('title')
                 text = message.get('text')
-                created_at = message.get('created_at')
-                sql = insert.format(id=m_id, title=title, text=text, created_at=created_at)
-                self.db().execute(sql)
+                created_at = int(message.get('created_at'))
+                self.db().execute(insert,(m_id,title,text,created_at))
+
 
                 payload = dict(
                     type=230,
                     title=title,
                     created_at=created_at,
                     mesg=text,
-                    mesg_id=id
+                    mesg_id=m_id,
                 )
                 self.to_driver(payload)
+
             self.db().commit()
 
     def send_new_messages_to_driver(self):
@@ -420,10 +427,12 @@ class App(threading.Thread):
 
     def on_message_viewed(self, payload_dict):
         print("on_message_viewed")
+        print(payload_dict)
         try:
-            sql = "UPDATE messages SET new=0 WHERE id ={mesg_id}".format(mesg_id=payload_dict['mesg_id'])
-            print(sql)
-            self.db_exec(sql)
+            if(payload_dict['mesg_id']) is not None:
+                sql = "UPDATE message SET new=0 WHERE id ={mesg_id}".format(mesg_id=payload_dict['mesg_id'])
+                print(sql)
+                self.db_exec(sql)
         except KeyError as e:
             print(e)
 
@@ -438,6 +447,28 @@ class App(threading.Thread):
         if unsigned and total_sec < 0:
             total_sec = total_sec * (-1)
         return int(total_sec)
+
+    def send_route_info(self):
+        print("_______________________ send_route_info ______________________________")
+
+        route_info = [
+            dict(item="Початок", desc="УЛ. ИЦКАХА РАБИНА"),
+            dict(item="Кінець", desc="ПЛ. ТИРАСПОЛЬСКАЯ"),
+            dict(item="Вартість", desc="3.0 грн"),
+            dict(item="Відстань", desc="7.97 км"),
+            dict(item="Інтервал", desc="5 мин"),
+            dict(item="Робочі дні", desc="Пн Вт Ср Чт Пт Сб Вс"),
+            dict(item="Робочі години", desc="05:24 - 22:58"),
+            dict(item="Компанія", desc='	КП "ОГЭТ"'),
+            dict(item="Телефон", desc="(048) 724 62 57"),
+            dict(item="Оновлення", desc="	05-11-2017")
+        ]
+
+        payload = dict (
+            type=240,
+            desc= route_info,
+        )
+        self.to_driver(payload)
 
     def get_route_info(self, driver_id):
         if self._actual_route_info:
@@ -601,11 +632,15 @@ class App(threading.Thread):
 
     def init_schedule_table(self):
         print("++++++++++++++++++++ init_schedule_table +++++++++++++++++++++++++")
+        '''
         sql = "SELECT p.`name`, -1001, -1001 " \
-              "from schedule s " \
-              "INNER JOIN point p  ON s.station_id = p.id AND s.`direction`= p.`direction` " \
-              "WHERE s.round={round} AND s.`date`='{wd}' AND s.`direction`={direction} AND p.`type`=1 " \
-              "ORDER BY s.time".format(round=3, wd=1, direction=1)
+              "from point p " \
+              "WHERE p.`direction`={direction} AND p.`type`=1 " \
+              "ORDER BY p.order".format(round=3, wd=1, direction=1)
+        '''
+
+        sql = "SELECT `name`, -1001, -1001 FROM `point` " \
+              "WHERE `direction`=1 AND `type`=1 ORDER BY `order`"
 
         cursor = self.db_exec(sql)
         schedule = []
@@ -1137,6 +1172,9 @@ class App(threading.Thread):
         print('****************** Request Validator registartion ***********************')
         url='http://st.atelecom.biz/bkts/api/registration'
         r = requests.put(url, headers=headers, json=payload)
+        print(url)
+
+        print(payload)
         print("status_code: {}".format(str(r.status_code)))
         #if r.status_code == requests.codes.ok:
         if r.status_code == 200:
@@ -1173,7 +1211,8 @@ class App(threading.Thread):
         if self._driver_on_route:
             self.goto_payment_mode()
         else:
-            self.goto_registration_mode()
+            pass
+            # self.goto_registration_mode()
 
     '''
     params: type, validator_id, message_id, driver_id
@@ -1328,6 +1367,7 @@ class App(threading.Thread):
         self.to_driver(payload)
 
         self.set_driver_status_bar()
+        self.send_route_info()
 
     def goto_registration_mode(self):
         print("goto_registration_mode")
@@ -1383,7 +1423,7 @@ class App(threading.Thread):
             # to validator
             reqDict['price'] = self.rate
             reqDict['success'] = 0
-            # self.to_validator(reqDict)
+            self.to_validator(reqDict)
 
             response = r.json()
             print(response)
@@ -1478,6 +1518,7 @@ class App(threading.Thread):
 
             self.get_equipment_list()
             self.validator_registration()
+            # self.send_route_info()
             return True
         else:
             raise MyError(self.getError('inaccessible'))
@@ -1837,6 +1878,7 @@ class App(threading.Thread):
                 reqDict['route'] = self.routeGuid
                 reqDict['success'] = 0
                 self.to_validator(reqDict)
+                # self.send_route_info()
 
                 # Switch Driver terminal to Validation Mode(type:41)
                 # vaidation_dict = dict()
@@ -1919,7 +1961,6 @@ class App(threading.Thread):
                 self.goto_payment_mode()
             else:
                 if self.code_validation(code, reqDict):
-                    pass
                     self.send_xdr(code)
         except MyError as e:
             print(e)
@@ -1931,12 +1972,10 @@ class App(threading.Thread):
             reqDict['success'] = -1
             self.to_validator(reqDict)
         self._message_id += 1
-
-
         return
 
     def alarmCB(self, reqDict):
-        #print(reqDict)
+        print("alarmCB")
         payload = dict(
             device_mac_address = self._mac,
             code = 201,
@@ -1944,41 +1983,46 @@ class App(threading.Thread):
             vehicle_id = self.vehicle_id,
             route_id = self.route_id,
             location = dict(
-                lat = reqDict.get("lat", None),
-                lng = reqDict.get("lon", None),
-                timestamp = reqDict.get("timestamp", None)
+                lat = self.latitude,
+                lng = self.longitude,
+                timestamp = datetime.datetime.now().timestamp()
             )
         )
         #curl -i -X POST -H "AUTHORIZATION: Bearer F9898736657462791FDCAE1143F404DF" -d '{"route_id": 23, "location": {"lng": 0.0, "timestamp": 1504245387, "lat": 0.0}, "staff_id": 122, "vehicle_id": 59, "device_mac_address": "b827eb3001c2"}' http://st.atelecom.biz/mob/v1/front/alarms/danger
         #print(payload)
         url = 'http://st.atelecom.biz/mob/v1/front/alarms/danger'
+        print("url: {}".format(url))
+        print(payload)
         r = requests.post(url, headers=self.get_auth_header(), json=payload)
         if (r.status_code == 200):
             response = r.json()
-            #print(response)
+            print(response)
         #else:
             #print(r)
 
     def call_operator_cb(self, reqDict):
+        print("call_operator_cb")
         payload = dict(
             device_mac_address=self._mac,
             code=201,
             staff_id=self.driverId,
             vehicle_id=self.vehicle_id,
             route_id=self.route_id,
-            location=dict(
-                lat=reqDict.get("lat", None),
-                lng=reqDict.get("lon", None),
-                timestamp=reqDict.get("timestamp", None)
+            location = dict(
+                lat = self.latitude,
+                lng = self.longitude,
+                timestamp = datetime.datetime.now().timestamp()
             )
         )
         #curl -i -X POST -H "AUTHORIZATION: Bearer F9898736657462791FDCAE1143F404DF" -d '{"route_id": 23, "location": {"lng": 0.0, "timestamp": 1504245387, "lat": 0.0}, "staff_id": 122, "vehicle_id": 59, "device_mac_address": "b827eb3001c2"}' http://st.atelecom.biz/mob/v1/front/alarms/danger
         #print(payload)
         url = 'http://st.atelecom.biz/mob/v1/front/alarms/call-me'
         r = requests.post(url, headers=self.get_auth_header(), json=payload)
+        print("url {}".format(url))
+        print(payload)
         if (r.status_code == 200):
             response = r.json()
-            #print(response)
+            print(response)
 
     def on_connect(self, client, payload, flag, rc):
         print("connected OK" if rc == 0 else "Bad connnection = {}".format(rc))
@@ -2040,10 +2084,6 @@ class App(threading.Thread):
                 self.qrValidationCB(payload_dict)
             elif _type == 11:
                 self.nfcValidationCB(payload_dict)
-            elif _type == 100:
-                self.alarmCB(payload_dict)
-            elif _type == 101:
-                self.call_operator_cb(payload_dict)
             elif _type == 110:
                 self.on_gps_coordinates(payload_dict)
             elif _type == 120:
@@ -2055,6 +2095,8 @@ class App(threading.Thread):
                 self.on_status_responce(payload_dict)
             elif _type == 230:
                 self.on_message_viewed(payload_dict)
+            elif _type == 250:
+                self.on_event_recieved(payload_dict)
             else:
                 print("Unknown request type: '{}'".format(_type))
                 return False
@@ -2072,6 +2114,17 @@ class App(threading.Thread):
             print(e)
             return False
 
+    def on_event_recieved(self, payload):
+        event_id = payload['event_id']
+        print(payload)
+        print("on_event_recieved type:{}".format(event_id))
+        if event_id == 1:
+            self.alarmCB(payload)
+        if event_id == 2:
+            self.call_operator_cb(payload)
+
+
+
     # Send message to Validator
     def to_validator(self, payload):
         print("to_validator")
@@ -2086,6 +2139,8 @@ class App(threading.Thread):
         print("to_ikts")
         self._message_id += 1
         payload['timestamp'] = int((time.time())) + self._utc_offset
+        payload['mac'] = "5EBDABF60273"
+
         print(payload)
         resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
         self.client.publish("t_informer", resultJSON)
@@ -2112,10 +2167,13 @@ class App(threading.Thread):
 
         self._local_exec_cnt += 1
 
+        if self._local_exec_cnt % 10 == 0:
+            if self.token is not None:
+                pass
+                self.get_messages()
         if self._local_exec_cnt % 60 == 0:
             if self.token is not None:
                 self.get_equipment_status();
-                self.get_messages()
 
 
     def check_internet(self):
