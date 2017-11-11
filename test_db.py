@@ -16,17 +16,24 @@ def t_diff(ts1, ts2):
 
 print("connect to database")
 db = sqlite3.connect('bkts.db')
-db.create_function("t_diff", 2, t_diff)
+curs = db.cursor()
+# db.create_function("t_diff", 2, t_diff)
 
 # CREATE equipment
-sql = "CREATE TABLE IF NOT EXISTS equipment " \
-      "(`mac` TEXT primary key," \
-      "`serial_number` TEXT," \
-      "`type` INTEGER," \
-      "`i_vehicle` INTEGER DEFAULT 0,"
-self.db().execute(sql)
+sql = "SELECT name, direction FROM `point` WHERE `type`=1 ORDER BY direction, id"
 
-self.db().commit()
+sql = "SELECT " \
+          "p.name," \
+          "-1001, " \
+          "-1001 " \
+          "from schedule s " \
+          "INNER JOIN point p  ON s.station_id = p.id AND s.`direction`= p.`direction` " \
+          "WHERE s.round={round} AND s.`date`='{wd}' AND s.`direction`={direction} AND p.`type`=1 " \
+          "ORDER BY s.time".format(round=3, wd=1, direction=1)
+schedule = []
+for row in curs.execute(sql):
+    schedule.append(dict(zip(('name','schedule','lag'), row)))
+print(schedule)
 
-sql = "INSERT INTO equipment (`mac`,`serial_number`,`type`) VALUES (?,?,?)"
+
 

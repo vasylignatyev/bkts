@@ -918,8 +918,9 @@ class Mqtt:
             print_n_log("JSON: cannot decode this message:", msg.payload.decode("utf-8"))
             return
         mac = data.get('mac')
-        if self.mac == mac:
+        if mac is not None and self.mac == mac:
             mesg_t = self.ichk(data.get('type'))
+            print("type= {}".format(str(mesg_t)))
             if mesg_t is None:
                 print_n_log("Got untyped message: {} ({})".format(mesg_t, data.get('type')))
                 return
