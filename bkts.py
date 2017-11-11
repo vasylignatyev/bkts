@@ -2,7 +2,7 @@
 import paho.mqtt.client as mqtt
 import time
 import datetime
-import os
+import os, sys, traceback
 
 #import pytz
 import requests
@@ -15,8 +15,14 @@ from uuid import getnode as get_mac
 
 
 def main():
-    print("Start main!")
-    app = App()
+    try:
+        print("Start main!")
+        App()
+    except KeyboardInterrupt:
+        print("Shutdown requested...exiting")
+    except Exception:
+        traceback.print_exc(file=sys.stdout)
+    sys.exit(0)
 
 
 class MyError(Exception):
@@ -50,6 +56,8 @@ class App(threading.Thread):
         self.TRACE_JSON= '/opt/telecard/trace.json'
         self.POINTS_JSON= '/opt/telecard/points.json'
         self.SCHEDULE_JSON= '/opt/telecard/schedule.json'
+        self.ARRIVAL_RADIUS = 0.00000015
+        self.DEPERTURE_RADIUS = 0.0000002
 
         self.token = None
         self.routeName = None
@@ -87,13 +95,14 @@ class App(threading.Thread):
         self.longitude = 0.0
         #stop_distance = 0.000547559129223524
         #self.stop_distance = 0.000000299820999996023854551154978576
-        self.stop_distance = 0.0000002
+        self.stop_distance = self.ARRIVAL_RADIUS
 
         self.validator_dict = {}
         self.ikts_dict = {}
 
         self._last_deviation = 0
 
+        self.current_oder=None
         self.current_point_name = None
         self.current_point_id = None
         self.current_schedule_id = None
@@ -248,6 +257,14 @@ class App(threading.Thread):
     def db_exec(self, sql):
         try:
             return self.db().execute(sql)
+        except sqlite3.Error as e:
+            print("DB ERROR: " + str(e))
+            print(sql)
+            raise MyError(self.getError('db_error'))
+
+    def db_execute(self, sql, params):
+        try:
+            return self.db().execute(sql, params)
         except sqlite3.Error as e:
             print("DB ERROR: " + str(e))
             print(sql)
@@ -532,19 +549,18 @@ class App(threading.Thread):
 
         dt = datetime.datetime.now()
         time_now = dt.strftime("%H:%M")
-        # self.current_weekday = dt.isoweekday()
+        self.current_weekday = dt.isoweekday()
 
-        print("Now time: {}, weekday: {}".format(time_now, self.current_weekday))
+        # print("Now time: {}, weekday: {}".format(time_now, self.current_weekday))
 
         sql = "SELECT s.round " \
               "FROM schedule s " \
               "INNER JOIN point p  ON s.station_id = p.id AND s.`direction`= p.`direction` " \
-              "WHERE p.`name` = '{p_name}' AND s.`date`={wd} AND p.`type`=1  AND s.`direction`={dir} " \
-              "ORDER BY t_diff(time(s.time), time('{time}')) LIMIT 1"
-        sql = sql.format(dir=self._direction, time=time_now, wd=self.current_weekday, p_name=point_name)
-        print(sql)
+              "WHERE p.`name` = :p_name' AND s.`date`=:wd AND p.`type`=1  AND s.`direction`=:dir " \
+              "ORDER BY t_diff(time(s.time),time(:time')) LIMIT 1"
 
-        cursor = self.db_exec(sql)
+        params = dict(dir=self._direction, time=time_now, wd=self.current_weekday, p_name=point_name)
+        cursor = self.db.execute(sql,params)
         row = cursor.fetchone()
         print(row)
         self._round = row[0]
@@ -686,8 +702,7 @@ class App(threading.Thread):
             print("Empty Table")
             return False
 
-        self.last_point_name = row[0]
-        self.last_point_id = row[1]
+        (self.last_point_name,self.last_point_id) = row
 
         self.to_ikts(req_dict)
         self.to_driver(req_dict)
@@ -707,49 +722,62 @@ class App(threading.Thread):
 
     def on_gps_coordinates(self, reqDict):
         print("Call for: on_gps_coordinates")
-        args = ('latitude', 'longitude')
-        error = ""
         try:
-            for arg in args:
-                vars(self)[arg] = reqDict[arg]
+            lat = float(reqDict['latitude'])
+            lon = float(reqDict['longitude'])
         except KeyError as e:
             print(e)
-            error += " Required attribute: '{}'.".format(arg)
-
-        if len(error) > 0:
-            print(error)
             return False
 
-        lat = float(reqDict['latitude'])
-        lon = float(reqDict['longitude'])
-        if self._direction is None or self._round is None:
-            return False
-        sql = "SELECT p.`name`, p.`id`, s.id, s.`time` FROM schedule s "\
-              "INNER JOIN point p ON s.station_id = p.id AND s.`direction`= p.`direction` "\
-              "WHERE p.`type`=1 AND s.`direction`={dir} AND s.`round`={r} AND dist({lat}, {lon}, `latitude` ,`longitude`) < {dist}"
-        sql = sql.format(lat=lat, lon=lon, dist=self.stop_distance, dir=self._direction, r=self._round)
-        # print(sql)
-        cursor = self.db_exec(sql)
-        station = cursor.fetchone()
-        # print(station)
-        if type(station).__name__ == "tuple" and station[0] is not None:
-            if self.current_point_name is None:
-                (self.current_point_name, self.current_point_id, self.current_schedule_id, self.current_schedule_time) = station
-                print("Current s_id: {}, p_id {}, round: {} time: {}".format(str(self.current_schedule_id),str(self.current_point_id), str(self._round), str(self.current_schedule_time)))
-
-                self.on_arrival()
-
-                if self.new_search:
-                    print("NEW SEARCH")
-                    self.search_point(self.current_point_name)
-
-                if station[1] == self.last_point_id:
-                    self.change_direction()
-
+        if self._direction is None:
+            sql = "SELECT `latitude`,`longitude` FROM `point` " \
+                  "WHERE `type`=1,`direction`=? " \
+                  "ORDER BY `order` LIMIT 1"
+            #Find first stop in derection 1
+            point = self.db().execute(sql, 1).fetchone()
+            #are we here?
+            if self.dist(lat,lon,point[0],point[1]) < self.stop_distance:
+                self._direction = 1
+                return
+            #Find first stop in derection 2
+            point = self.db().execute(sql, 2).fetchone()
+            #are we here?
+            if self.dist(lat,lon,point[0],point[1]) < self.stop_distance:
+                self._direction = 2
+                return
         else:
-            if self.current_point_name is not None:
-                self.on_departure(self.current_point_name)
-                self.current_point_name = None
+            # search last pooint ID of leg
+            sql = "SELECT `id` FROM point WHERE `direction`= :dir` ORDER BY `order` DESC LIMIT 1"
+            row = self.db().execute({"dir": self._direction, "lat": lat, "lon": lon, "dist": self.stop_distance}).fetchone()
+            if row is not None:
+                last_point_id_of_leg = row[0]
+
+            sql =  "SELECT `id`,`name` FROM point " \
+                   "WHERE `type`=1 AND `direction`=:dir AND dist(:lat:, :lon:, `latitude` ,`longitude`) < :dist"
+            row = self.db().execute({"dir":self._direction,"lat":lat,"lon":lon,"dist":self.stop_distance}).fetchone()
+            if row is not None:
+                # We are near a stop
+                (self.current_point_id, point_name ) = row
+                if self._round is not None:
+                    sql="SELECT `id`,`time` FROM schedule " \
+                        "WHERE `station_id` = :id AND `direction` = :dir AND `round` = :round"
+                    row=self.db().execute(sql,{"dir":self._direction,"round":self._round}).fetchone()
+                    if row is not None:
+                        (self.current_schedule_id,self.current_schedule_time) = row
+
+                if self.current_point_name is None:
+                    self.current_point_name = point_name
+                    print("Current s_id: {}, p_id {}, round: {} time: {}".format(str(self.current_schedule_id),str(self.current_point_id), str(self._round), str(self.current_schedule_time)))
+
+                    self.on_arrival()
+
+                    if self.current_point_id == last_point_id_of_leg:
+                        self.change_direction()
+
+            else:
+                if self.current_point_name is not None:
+                    self.on_departure(self.current_point_name)
+                    self.current_point_name = None
 
     def change_direction(self):
         self._direction = 1 if self._direction == 2 else 2
@@ -815,6 +843,8 @@ class App(threading.Thread):
     def on_arrival(self):
         print("++++++++++++++++++++++ ARRIVAL ++++++++++++++++++++++++++++++++")
         print("Arrive to: '{}'".format(self.current_point_name))
+        self.stop_distance = self.DEPERTURE_RADIUS
+
         dt = datetime.datetime.now()
         self.arrival_time = dt.strftime('%H:%M:%S')
         print("arrival time: {}, schedule time: {}".format(self.arrival_time, self.current_schedule_time))
@@ -932,6 +962,62 @@ class App(threading.Thread):
 
     def on_departure(self, station):
         print("Departure from: '{}'".format(station))
+
+        self.stop_distance = self.ARRIVAL_RADIUS
+
+        if self.current_oder is not None:
+            sql = "SELECT `name`,`id`,`now_audio_url`,`now_audio_dttm`,`now_video_url`,`now_video_dttm`," \
+                  "`future_audio_url`,`future_audio_dttm`,`future_video_url`,`future_video_dttm` " \
+                  "FROM `point` WHERE `type`=1 AND `order` > :current_oder " \
+                  "ORDER BY `order` LIMIT 4"
+            result = self.db().execute().fetchall()
+
+            sql = "SELECT `id`,`time` FROM `schedule` " \
+                  "WHERE `time`>=:st' AND `date`=:wd AND `direction`=:dir AND `round`:round AND station_id=:id LIMIT 1"
+
+            next_stop_name = None
+            current_stot_time = None
+            stop_info = dict(
+                type=221,
+                round=self._round,
+                direction=self._direction,
+            )
+
+            properties = ('curr_stop_info', 'next1_stop_info', 'next2_stop_info', 'next3_stop_info')
+            i=0
+            for row in result:
+                station_row = self.db().execute(sql,
+                    {"st":self.current_schedule_time,
+                     "wd":self.current_weekday,
+                     "dir":self._direction,
+                     "round":self._round,
+                     "station_id":row[1]}).fetchone()
+
+                if station_row is not None and current_stot_time is None:
+                    current_stot_time = station_row[1]
+
+                _property = properties[i]
+                i += 1
+
+                _stop_info = {}
+                _stop_info["route_id"] = self.route_id
+                _stop_info["stop_id"] = self.current_point_id
+                _stop_info["ukr"] = row[0]
+                _stop_info["now_audio_url"] = row[2]
+                _stop_info["now_audio_dttm"] = row[3]
+                _stop_info["now_video_url"] = row[4]
+                _stop_info["now_video_dttm"] = row[5]
+                _stop_info["future_audio_url"] = row[6]
+                _stop_info["future_audio_dttm"] = row[7]
+                _stop_info["future_video_url"] = row[8]
+                _stop_info["future_video_dttm"] = row[8]
+                _stop_info["direction"] = self._direction
+                if station_row is not None:
+                    _stop_info["eta"] = self.t_diff(station_row[1], current_stot_time)
+
+                stop_info[_property] = _stop_info
+
+
         # SERCH STOP  INFORMATION
         sql = "SELECT p.`name`,p.`id`,s.`id`,s.`time`, s.`time`," \
               "p.`now_audio_url`,p.`now_audio_dttm`,p.`now_video_url`,p.`now_video_dttm`, " \
@@ -963,11 +1049,16 @@ class App(threading.Thread):
                 if current_stot_time is None:
                     current_stot_time = row[3]
 
-                stop_info[_property] = dict(
-                    route_id=self.route_id,
-                    stop_id=self.current_point_id,
-                    ukr=row[0],
-                    eta=self.t_diff(row[3], current_stot_time),
+                stop_info[_property]
+                _stop_info = {}
+                _stop_info["route_id"]=self.route_id
+                _stop_info["stop_id"]=self.current_point_id
+                _stop_info["ukr"]=row[0]
+
+                if
+                _stop_info["eta"]=self.t_diff(row[3], current_stot_time)
+
+                    eta=,
                     now_audio_url=row[5],
                     now_audio_dttm=row[6],
                     now_video_url=row[7],
