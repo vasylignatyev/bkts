@@ -29,10 +29,10 @@ class Emulator:
                 self._gps_path = json.load(infile)
                 infile.close()
         except Exception as e:
-            print(str(e))
+            # print(str(e))
             return
 
-        print("Path file containe '{}' points".format(len(self._gps_path)))
+        # print("Path file containe '{}' points".format(len(self._gps_path)))
 
         self._message_id = 0
         self._dst = time.daylight and time.localtime().tm_isdst > 0
@@ -42,7 +42,7 @@ class Emulator:
         self.longitude = 0.0
         self._mac = hex(get_mac())[2:14]
         self._mac = self._mac.upper()
-        print("my MAC is: {}".format(self._mac))
+        # print("my MAC is: {}".format(self._mac))
 
         self.run()
 
@@ -78,10 +78,12 @@ class Emulator:
         self.emmulate_gps()
 
     def on_connect(self, client, payload, flag, rc):
-        print("connected OK" if rc == 0 else "Bad connnection = {}".format(rc))
+        pass
+        # print("connected OK" if rc == 0 else "Bad connnection = {}".format(rc))
 
     def on_message(self, client, userdata, message):
-        print("on_message: {}".format(message.payload.decode("utf-8")))
+        pass
+        # print("on_message: {}".format(message.payload.decode("utf-8")))
 
     def generator(self):
         broker = "localhost"
@@ -89,11 +91,11 @@ class Emulator:
         self.client.on_connect = self.on_connect  # attach function to callback
         self.client.on_message = self.on_message  # attach function to callback
 
-        print("Connection to broker ", broker)
+        # print("Connection to broker ", broker)
         try:
             self.client.connect(broker)
         except Exception as e:
-            print("Can't connect: ", e)
+            # print("Can't connect: ", e)
             exit(1)
         else:
             i = 0
@@ -110,7 +112,7 @@ class Emulator:
 
         '''
         while True:
-            print("Hello world")
+            # print("Hello world")
             time.sleep(1)
         '''
 
@@ -119,7 +121,7 @@ class Emulator:
         self._message_id += 1
         payload['timestamp'] = int((time.time())) + self._utc_offset
         payload['mac'] = self._mac
-        print(payload)
+        # print(payload)
         resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
         self.client.publish("t_driver", resultJSON)
         return

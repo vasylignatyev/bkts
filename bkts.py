@@ -576,8 +576,8 @@ class App(threading.Thread):
         return int(total_sec)
 
     def send_route_info(self, route_dict):
-        logging.debug("send_route_info")
-        logging.error("route_dict: {}".format(str(route_dict)))
+        logging.debug("send_route_info {}". format(str(route_dict)))
+
         route_info = []
         try:
             route_info.append( {"item": "Маршрут", "desc": route_dict.get('description', "Unknown") } )
@@ -866,7 +866,6 @@ class App(threading.Thread):
         :param reqDict:
         :return:
         '''
-        logging.debug("on_gps_coordinates")
         self._gps_cnt = 0
 
         try:
@@ -878,6 +877,7 @@ class App(threading.Thread):
 
         # save coordinates
         (self.latitude, self.longitude) = (lat, lon)
+        logging.debug("on_gps_coordinates lat: {}, lon: {}".format(str(lat), str(lon)))
 
         # Find direction
         '''
@@ -903,6 +903,7 @@ class App(threading.Thread):
                     self._direction = 2
         '''
         #make direction 1 or 2
+
         self._direction = 1 if self._direction == 1 else 2
         logging.debug( "Direction: {}".format(self._direction) )
 
@@ -1237,11 +1238,10 @@ class App(threading.Thread):
                 timestamp=int(time.time())
             )
         )
-
-        print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
         # Send request
+        logging.info("IKTS registration request: {}".format(str(payload)))
         r = self.to_atelecom('POST', 'mob/v1/front/alarms/status', payload)
-        print(r)
+        logging.info("Responce: {} text: {}".format(str(r), str(r.text)));
 
         # if r.status_code == requests.codes.ok:
 
@@ -1266,7 +1266,7 @@ class App(threading.Thread):
 
     # Validator regisration event
     def on_validator_reg_cb(self, reqDict):
-        logging.debug('on_validator_reg_cb')
+        logging.info('on_validator_reg_cb')
         # Create validators dictionary
         try:
             validator = dict(
@@ -1297,6 +1297,7 @@ class App(threading.Thread):
             route='',
             price=0,
         )
+        logging.info("Validator '{}' registration success".format(reqDict['validator_id']))
         self.to_validator(result)
 
         self.validator_dict[reqDict['validator_id']] = validator
@@ -1358,6 +1359,13 @@ class App(threading.Thread):
         # reset values
         self._driver_exist = self._driver_on_route = self._driver_on_vehicle = False
 
+        if self.driver_registration() is True:
+            self.goto_payment_mode()
+            self._driver_on_route = True
+
+        return True
+
+        '''
         driver = self.get_driver_saved_info()
         if driver is False:
             self.goto_registration_mode()
@@ -1372,8 +1380,8 @@ class App(threading.Thread):
         else:
             self.goto_payment_mode()
             self._driver_on_route = True
+        '''
 
-            return True
 
         '''
         route = self.get_route_saved_info()
@@ -1436,7 +1444,7 @@ class App(threading.Thread):
             return False
 
         return True
-
+    '''
     def get_route_saved_info(self):
         logging.debug("get_route_saved_info")
         try:
@@ -1461,7 +1469,6 @@ class App(threading.Thread):
         self.route_guid = route.get('guid', None)
 
         return True
-
     def get_vehicle_saved_info(self):
         logging.debug("get_vehicle_saved_info")
         try:
@@ -1481,7 +1488,6 @@ class App(threading.Thread):
         self.vehicle_id = vehicle['id']
         logging.debug("Vehicle ID: " + str(self.vehicle_id))
         return True
-
     @staticmethod
     def check_info( info, keys):
         logging.debug("check_info")
@@ -1491,6 +1497,9 @@ class App(threading.Thread):
                 return False
         logging.debug("check_info: True")
         return True
+    '''
+
+
 
     def goto_refund_mode(self):
         logging.info("go_to_refound_mode")
@@ -1619,9 +1628,9 @@ class App(threading.Thread):
         self._driver_on_route = False
         self.driver_card_number = None
 
-        logging.info("Remove '{}'".format(self.DRIVER_JSON))
+        logging.info("Remove '{}'".format(self.BKTS_DUMP))
         try:
-            os.remove(self.DRIVER_JSON)
+            os.remove(self.BKTS_DUMP)
         except Exception as e:
             logging.info(str(e))
 
@@ -1686,104 +1695,153 @@ class App(threading.Thread):
             logging.info("Current token: '{}'".format(str(self.token)))
             return self.get_response("success")
 
-    def driver_registration(self, code, reqDict):
+    def driver_registration(self, reqDict = None):
         '''
         curl -i -X POST -d '{"code":"43E9DBA494E80"}' http://st.atelecom.biz/mob/v1/auth
         :param code:
         :param reqDict:
         :return:
         '''
-        logging.debug("driver_registration")
+        logging.info("driver_registration")
 
         # reset values
         self._driver_exist = self._driver_on_route = self._driver_on_vehicle = False
+        
+        code = False
+
+        if reqDict is None:
+            # Retrieve information from dump
+            try:
+                with open(self.BKTS_DUMP, 'r') as infile:
+                    auth_info = json.load(infile)
+                    infile.close()
+            except Exception as e:
+                logging.info("There are no prvios auth information, so we will waite for driver card registration")
+                return False
+            try:
+                code = auth_info['model']['card_number']
+                logging.info("Driver card is '{}'".format(code))
+            except KeyError as e:
+                logging.error("No driver card number in saved auth info")
+                return False
+        else:
+            # This is card registration! Lets try card number
+            try:
+                code = reqDict['qr']
+            except KeyError as e:
+                logging.error("Key {} required.".format(str(e)))
+                raise MyError(self.get_response('conflict'))
 
         # Send request
         r = self.to_atelecom("POST", 'mob/v1/auth', {"code": code})
-        if not r:
+        if (not r) or (r.status_code == 404):
             logging.error("Driver registration failed.")
-            raise MyError(self.get_response('deny'))
-
-        elif r.status_code == 404:
-            raise MyError(self.get_response('deny'))
+            if reqDict is None:
+                return False
+            else:
+                raise MyError(self.get_response('deny'))
 
         elif r.status_code == 200:
-            response = r.json()
             try:
-                driver = response['model']
-                staff_type = driver['type']
-                vehicle = response['vehicle']
-                route = response['route']
-                self.token = response['token']
-            except KeyError as e:
-                logging.error("Key error: {}".format(str(e)))
-                raise MyError(self.get_response('deny'))
+                auth_info = r.json()
+            except ValueError as e:
+                logging.error("JSON decode error {}".format(str(e)))
+                if reqDict is None:
+                    return False
+                else:
+                    raise MyError(self.get_response('deny'))
 
-            self.send_route_info(route)
-
-            self.print_dict('driver', driver)
-            self.print_dict("route", route)
-            self.print_dict("vehicle", vehicle)
-
-            if staff_type != 1:
-                self.driver_logout()
-                raise MyError(self.get_response('deny'))
-
-            # write down received information
-            try:
-                logging.debug("WRITE: " + self.BKTS_DUMP)
-                with open(self.BKTS_DUMP, 'w') as outfile:
-                    json.dump(response, outfile)
-                outfile.close()
-
-                logging.debug("WRITE: " + self.DRIVER_JSON)
-                with open(self.DRIVER_JSON, 'w') as outfile:
-                    json.dump(driver, outfile)
-                outfile.close()
-
-                # self.send_route_info(route)
-                logging.debug("WRITE: " + self.ROUTE_JSON)
-                with open(self.ROUTE_JSON, 'w') as outfile:
-                    json.dump(route, outfile)
-                outfile.close()
-
-                logging.debug("WRITE: " + self.VEHICLE_JSON)
-                with open(self.VEHICLE_JSON, 'w') as outfile:
-                    json.dump(vehicle, outfile)
-                outfile.close()
-
-            except Exception as e:
-                logging.error(str(e))
-
-            if self.set_registration_vars(driver, route, vehicle) is False:
-                raise MyError(self.get_response('deny'))
-
-            logging.debug("****************************************")
-
-            reqDict['success'] = 0
-            self.to_validator(reqDict)
+            if self.set_registration_vars_new(auth_info) is False:
+                logging.error("Driver registration error")
+                if reqDict is None:
+                    return False
+                else:
+                    raise MyError(self.get_response('deny'))
 
             logging.info("Current token: '{}'".format(str(self.token)))
 
-            # write session information
+            if reqDict is not None:
+                reqDict['success'] = 0
+                self.to_validator(reqDict)
+
+            # write auth information
             try:
-                with open(self.SESSION_JSON, 'w') as outfile:
-                    json.dump( {'code': code,'token': self.token}, outfile)
+                with open(self.BKTS_DUMP, 'w') as outfile:
+                    json.dump( auth_info, outfile)
                 outfile.close()
             except Exception as e:
                 logging.error(str(e))
+                raise MyError(self.get_response('conflict'))
+
+            self.goto_payment_mode()
+            self._driver_on_route = True
 
             # GET ROUTE AND SCHEDULE
             self.get_route_info(self.driver_id)
 
             self.get_equipment_list()
-            self.validator_registration()
+
+            self.send_route_info(auth_info['route'])
+
+            # self.validator_registration()
 
             logging.debug("Vehicle ID: " + str(self.vehicle_id))
 
     def print_dict(self, name, _dict):
         for key in _dict:
             logging.debug("{} '{}': '{}'".format(name, str(key), str(_dict[key])))
+
+    def set_registration_vars_new(self, response):
+        try:
+            self.token = response['token']
+            driver = response['model']
+            staff_type = driver['type']
+            vehicle = response['vehicle']
+            route = response['route']
+
+            self.driver_id = driver['id']
+            self.driver_name = driver['name']
+            self.driver_card_number = driver['card_number']
+
+            self.route_id = route["id"]
+            self.route_name = route['name']
+            self.route_guid = route['guid']
+            self.route_rate = route['rate']
+            self.route_desc = route['description']
+            self.route_interval = route['interval']
+            self.route_working_hours = route['working_hours']
+            self.route_updated_at = route['updated_at']
+
+            self.vehicle_id = vehicle["id"]
+
+        except KeyError as e:
+            logging.error("Key error: {}".format(str(e)))
+            return False
+
+        # check staff_type: 1 - driver, 2 - conductor, 3 controller
+        if staff_type != 1:
+            self.driver_logout()
+            logging.error( "Staff is not a driver: {}".format(str(driver)))
+            return False
+
+        self.send_route_info(route)
+
+        self.print_dict('driver', driver)
+        self.print_dict("route", route)
+        self.print_dict("vehicle", vehicle)
+
+        # write down received information
+        try:
+            logging.debug("WRITE: " + self.BKTS_DUMP)
+            with open(self.BKTS_DUMP, 'w') as outfile:
+                json.dump(response, outfile)
+            outfile.close()
+
+        except Exception as e:
+            logging.error(str(e))
+            return False
+
+        return True
 
     def set_registration_vars(self, driver, route, vehicle):
         try:
@@ -1805,7 +1863,7 @@ class App(threading.Thread):
             return True
 
         except KeyError as e:
-            logging.error("KeyError: {}".format(str(e)))
+            logging.error("set_registration_vars, KeyError: {}".format(str(e)))
             return False
 
     def get_trusted(self):
@@ -2255,6 +2313,9 @@ class App(threading.Thread):
             self.to_validator(reqDict)
 
             self.goto_registration_mode()
+
+            self.driver_logout()
+
             return False  # False is preventing for xdr recording
 
         if self.route_guid is None or self.vehicle_id is None:
@@ -2437,7 +2498,7 @@ class App(threading.Thread):
             logging.debug("Code: '{}',  length: {}".format(code, str(len(code))))
 
             if self._driver_on_route is False:
-                self.driver_registration(code, reqDict)
+                self.driver_registration(reqDict)
                 reqDict['price'] = self.route_rate
                 reqDict['ukr'] = self.get_vehicle_type_ukr(self.route_guid) + str(self.route_name)
                 reqDict['eng'] = self.get_vehicle_type_eng(self.route_guid) + str(self.route_name)
@@ -2578,7 +2639,7 @@ class App(threading.Thread):
     def on_message(self, client, userdata, message):
         try:
             payload_dict = json.loads(message.payload.decode("utf-8"))
-            _type = int(payload_dict.get('type', None))
+            _type = int(payload_dict['type'])
 
             if _type == 0:  # 'Registration'
                 self.on_validator_reg_cb(payload_dict)
@@ -2626,7 +2687,8 @@ class App(threading.Thread):
                 gps_emulator.Emulator()
                 self.gps_emulator_run = True
 
-            # TODO Clear local and remote leglist
+            self.clear_local_leglist()
+            self.clear_remote_leglist()
 
     # Send message to Validator
     def to_validator(self, payload):

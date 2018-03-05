@@ -1690,15 +1690,15 @@ def local_def_tab():
 #    if SENSOR_NDX['mobile_terminal'] is not -2:
 #        re = ping_device(dict(index=SENSOR_NDX['mobile_terminal'], ip="mt.ip"))
     if status_array[SENSOR_NDX['validator1']] != -2:
-        re = ping_device(dict(index=SENSOR_NDX['validator1'], ip="192.168.1.5"))
+        re = ping_device(dict(index=SENSOR_NDX['validator1'], ip="192.168.88.11"))
     if status_array[SENSOR_NDX['validator2']] != -2:
-        re = ping_device(dict(index=SENSOR_NDX['validator2'], ip="192.168.1.6"))
+        re = ping_device(dict(index=SENSOR_NDX['validator2'], ip="192.168.88.12"))
     if status_array[SENSOR_NDX['validator3']] != -2:
-        re = ping_device(dict(index=SENSOR_NDX['validator3'], ip="192.168.1.7"))
+        re = ping_device(dict(index=SENSOR_NDX['validator3'], ip="192.168.88.13"))
     if status_array[SENSOR_NDX['bkts']] != -2:
-        re = ping_device(dict(index=SENSOR_NDX['bkts'],  ip="192.168.1.10"))
+        re = ping_device(dict(index=SENSOR_NDX['bkts'],  ip="192.168.88.10"))
     if status_array[SENSOR_NDX['ikts']] != -2:
-        re = ping_device(dict(index=SENSOR_NDX['ikts'],  ip="192.168.1.253"))
+        re = ping_device(dict(index=SENSOR_NDX['ikts'],  ip="192.168.88.253"))
         if re[0]:
             chk_list = SENSOR_NDX['ikts_speakers']
             chk_list.append(SENSOR_NDX['ikts_display'])
