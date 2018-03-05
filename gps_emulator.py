@@ -3,34 +3,29 @@
 import paho.mqtt.client as mqtt
 import time
 import threading
-import sys
+# import gps_emulator
 import json
 from uuid import getnode as get_mac
 import os
 
-def main():
-    print("Start main!")
-    app = App()
 
+def main():
+    App()
 
 class App(threading.Thread):
-    # def __init__(self, q, loop_time = 1.0/60):
     def __init__(self):
         super(App, self).__init__()
+        self.start()
 
-        self._script_dir = os.path.dirname(os.path.realpath(__file__))
+    def run(self):
+        Emulator()
 
-        self._gps_path = None
-
-        print(len(sys.argv))
-        if len(sys.argv) < 2:
-            print("There are should be at least 1 argument")
-            exit(-1)
-
-        self._path_file = "{}/{}".format(self._script_dir, sys.argv[1])
+class Emulator:
+    def __init__(self):
+        self.client = None
 
         try:
-            with open(self._path_file, 'r') as infile:
+            with open("AAC04800010.json", 'r') as infile:
                 self._gps_path = json.load(infile)
                 infile.close()
         except Exception as e:
@@ -49,26 +44,12 @@ class App(threading.Thread):
         self._mac = self._mac.upper()
         print("my MAC is: {}".format(self._mac))
 
-        self.start()
+        self.run()
 
-    def to_driver(self, payload):
-        #print("to_driver")
-        self._message_id += 1
-        payload['timestamp'] = int((time.time())) + self._utc_offset
-        payload['mac'] = self._mac
-        print(payload)
-        resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
-        self.client.publish("t_driver", resultJSON)
-        return
-
-    def to_bkts(self, payload):
-        # print("to_bkts")
-        self._message_id += 1
-        payload['timestamp'] = int((time.time())) + self._utc_offset
-        # print(payload)
-        resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
-        self.client.publish("t_bkts", resultJSON)
-        return
+    def run(self):
+        thread = threading.Thread(target=self.generator, args=())
+        # thread.daemon = True                            # Daemonize thread
+        thread.start()                                  # Start the execution
 
     def emmulate_gps(self):
         # print("emmulate_gps")
@@ -93,6 +74,8 @@ class App(threading.Thread):
         )
         self.to_bkts(payload)
 
+    def local_exec(self):
+        self.emmulate_gps()
 
     def on_connect(self, client, payload, flag, rc):
         print("connected OK" if rc == 0 else "Bad connnection = {}".format(rc))
@@ -100,10 +83,7 @@ class App(threading.Thread):
     def on_message(self, client, userdata, message):
         print("on_message: {}".format(message.payload.decode("utf-8")))
 
-    def local_exec(self):
-        self.emmulate_gps()
-
-    def run(self):
+    def generator(self):
         broker = "localhost"
         self.client = mqtt.Client("GPS")  # create new instance
         self.client.on_connect = self.on_connect  # attach function to callback
@@ -128,5 +108,30 @@ class App(threading.Thread):
             self.client.loop_stop()
             self.client.disconnect()
 
+        '''
+        while True:
+            print("Hello world")
+            time.sleep(1)
+        '''
 
-if __name__ == "__main__": main()
+    def to_driver(self, payload):
+        #print("to_driver")
+        self._message_id += 1
+        payload['timestamp'] = int((time.time())) + self._utc_offset
+        payload['mac'] = self._mac
+        print(payload)
+        resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
+        self.client.publish("t_driver", resultJSON)
+        return
+
+    def to_bkts(self, payload):
+        # print("to_bkts")
+        self._message_id += 1
+        payload['timestamp'] = int((time.time())) + self._utc_offset
+        # print(payload)
+        resultJSON = json.dumps(payload, ensure_ascii=False).encode('utf8')
+        self.client.publish("t_bkts", resultJSON)
+        return
+
+if __name__ == "__main__":
+    main()

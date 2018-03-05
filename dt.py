@@ -20,14 +20,14 @@ from queue import Queue
 from collections import OrderedDict
 from time import localtime, strftime
 from PyQt5.QtWidgets import QMainWindow, QApplication, QPushButton, QWidget, QAction, QTabWidget, QVBoxLayout, QHBoxLayout, QStatusBar, QLabel, QGridLayout, QScrollArea, QFrame, QDialog, QTabBar, QMessageBox, QSizePolicy, QStackedWidget
-from PyQt5.QtCore import pyqtSlot, QTimer, QSize, QPoint, QMargins, Qt, QRect, QUrl
+from PyQt5.QtCore import QTimer, QSize, QPoint, QMargins, Qt, QRect, QUrl
 from PyQt5.QtGui import QIcon, QPixmap, QFont, QPainter, QMovie, QPen, QColor
 from PyQt5.QtWebKitWidgets import QWebView
 from PyQt5.QtMultimedia import QSound
 
 
 PROGNAME = "driver-terminal"
-SW_VERSION = "0.52"
+SW_VERSION = "0.52o"
 HW_VERSION =  platform.machine() + "-" + platform.release().split("-")[-1]
 
 # base
@@ -148,7 +148,7 @@ BEEP = IMAGE_DIR + "beep1.wav"
 TAB_NDX = 0 # work mode
 REG_NDX = 1 # wait mode
 
-DEFAULT_TAB = 0
+DEFAULT_TAB = 3
 STAT_TAB = 0  # 0 - Статуси
 STOP_TAB = 1  # 1 - Зупинки
 DESC_TAB = 2  # 2 - Опис
@@ -229,6 +229,7 @@ MQTT_TYPE_GPS_INFO   = 310
 MQTT_TYPE_STARTLEG   = 320 # ???
 MQTT_TYPE_SCHEDULE   = 330 # [dict(name="", schedule=-1000, lag=-1000)] *9)
 MQTT_TYPE_EQUIPMENT  = 340
+MQTT_TYPE_POINT      = 350
 MQTT_STATUS_OK        = 0
 MQTT_STATUS_ERR       = 1
 MQTT_STATUS_UNAVAIL   = 2
@@ -248,10 +249,11 @@ QTYPE_SCHEDULE   = 5
 QTYPE_ROUTE_DESC = 6
 QTYPE_EQUIPMENT  = 7
 QTYPE_QT_MESSAGE = 8
+QTYPE_POINT      = 9
 QTYPE_MQTT_MESSAGE = 20 # qt -> mqtt
 QTYPE_EVENT        = 21
 
-QTYPE_WIN_RANGE = range(QTYPE_GPS_INFO, QTYPE_QT_MESSAGE + 1)
+QTYPE_WIN_RANGE = range(QTYPE_GPS_INFO, QTYPE_POINT + 1)
 QTYPE_MQTT_RANGE = range(QTYPE_MQTT_MESSAGE, QTYPE_EVENT + 1)
 
 GPS_TRACKING = False
@@ -365,13 +367,6 @@ html = '''
                 map: map
             });
             bounds = new google.maps.LatLngBounds();
-            var request = {
-                origin: { lat:stop[0].lat, lng:stop[0].lng},
-//                destination: { lat:stop[len-1].lat, lng:stop[len-1].lng},
-                destination: { lat:stop[0].lat, lng:stop[0].lng},
-                travelMode: google.maps.TravelMode.DRIVING,
-                waypoints: []
-            }
             var info = new google.maps.InfoWindow();
             for (i = 0; i < len; i++) {
                 var marker = new google.maps.Marker({
@@ -379,14 +374,13 @@ html = '''
                     title: stop[i].title,
                     icon: {
                         path: google.maps.SymbolPath.CIRCLE,
-                        strokeColor: "#eee",
-                        strokeWeight: 2.7,
+//                        strokeColor: "#eee",
+                        strokeColor: "#222",
+                        strokeWeight: 1.7,
                         strokeOpacity: 0.8,
-//                        fillColor: "#fff",
                         fillColor: col,
-                        fillOpacity: 1,
-//                        scale: 4.7
-                        scale: 14
+                        fillOpacity: 0.9,
+                        scale: 8.7
                     },
                     map: map
                 });
@@ -398,22 +392,22 @@ html = '''
                     });
                 })(marker, stop[i]);
             }
-//            for (i = 1; i < len - 1; i++) {
-//                request.waypoints.push({
-//                    location: { lat:stop[i].lat, lng:stop[i].lng},
-//                    stopover: true
-//                });
-//            }
+            var request = {
+                origin: { lat:stop[0].lat, lng:stop[0].lng},
+                destination: { lat:stop[len-1].lat, lng:stop[len-1].lng},
+                travelMode: google.maps.TravelMode.TRANSIT,
+                transitOptions: { modes:[google.maps.TransitMode.TRAM, google.maps.TransitMode.TRAM]}
+            }
             directions.route(request, function(result, status) {
                 if (status == google.maps.DirectionsStatus.OK) {
                     erender.setDirections(result);
                     irender.setDirections(result);
                 }
             });
-        }
+        };
 
         var bus;
-        var defZoomLevel = 17;
+        var defZoomLevel = 16;
         function moveBus(lat, lng) {
             var pos = new google.maps.LatLng(lat, lng);
             if (pos.equals(stop0)) {
@@ -808,12 +802,14 @@ def local_exec():
 ####################################################################################
 
 class Mqtt:
-    def __init__(self, broker, mac, ip, topics):
+    def __init__(self, broker, name, mac, ip, topics):
         self.broker = broker
+        self.name = name
         self.mac = mac
         self.ip = ip
         self.topics = topics
-        self.mqtt = paho.mqtt.client.Client(self.mac, clean_session=False)
+        self.mqtt = paho.mqtt.client.Client(self.name, clean_session=False)
+
         self.mqtt.on_message = self.on_message
         self.mqtt.on_connect = self.on_connect
         self.mqtt.on_publish = self.on_publish
@@ -841,7 +837,7 @@ class Mqtt:
             self.alarm['c'].wait(timeout=delay)
         if self.connected:
             return
-        print_n_log("Connecting to broker at", self.broker, "as", self.mac, "...")
+        print_n_log("Connecting to broker at", self.broker, "as", self.name, "...")
         rc = None
         try:
             rc = self.mqtt.connect(self.broker)
@@ -939,23 +935,21 @@ class Mqtt:
         return v
 
     def on_message(self, client, data, msg):
-        print_n_log("Got1 message on", msg.topic, str(msg.payload)) # raw output
+#        print_n_log("Got1 message on", msg.topic, str(msg.payload)) # raw output
         if msg.topic != "t_driver":
             return
 #        print_n_log("Got2 message on", msg.topic, msg.payload.decode("utf-8"))
-        print_n_log("Got some message on", msg.topic)
         try:
             data = json.loads(msg.payload.decode("utf-8"))
         except:
             print_n_log("JSON: cannot decode this message:", msg.payload.decode("utf-8"))
             return
-        mac = data.get('mac', None)
-#        print_n_log("maccc", mac)
+        mesg_t = self.ichk(data.get('type'))
+        if mesg_t is None:
+            print_n_log("Got untyped message:", data)
+            return
+        mac = data.get('mac')
         if self.mac == mac:
-            mesg_t = self.ichk(data.get('type'))
-            if mesg_t is None:
-                print_n_log("Got untyped message: {} ({})".format(mesg_t, data.get('type')))
-                return
             if mesg_t == MQTT_TYPE_REG_RESP:
                 status = self.ichk(data.get('success'))
                 if status is not None:
@@ -1024,8 +1018,13 @@ class Mqtt:
                     share.put(QTYPE_GPS_INFO, dict(lat=lat, lon=lon))
                     if GPS_TRACKING:
                         print_n_log("Message GPS INFO: lat={}, lon={}".format(lat, lon))
+                elif mesg_t == MQTT_TYPE_POINT:
+                    data = self.lchk(data.get('points'))
+                    if data is not None:
+                        share.put(QTYPE_POINT, data)
+                        print_n_log("Got POINT message")
                 else: 
-                    print_n_log("Was that broadcast? - I do know nothing!")
+                    print_n_log("Was that broadcast?")
             else:
                 print_n_log("I'm a little confused, senator: \"{}\" != \"{}\"".format(self.mac, mac))
 
@@ -1371,7 +1370,8 @@ def get_ip(ifname):
 
 def run_mqtt():
     global mqtt
-    mqtt = Mqtt(MQTT_BROKER, get_mac(IFACE), get_ip(IFACE), MQTT_RTOPIC)
+    mqtt = Mqtt(MQTT_BROKER, PROGNAME.upper()+"-"+SW_VERSION+"_"+str(os.getpid()),
+        get_mac(IFACE), get_ip(IFACE), MQTT_RTOPIC)
 
 
 if __name__ == "__main__":

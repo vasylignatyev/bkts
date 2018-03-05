@@ -1,3 +1,5 @@
+#!/usr/bin/python2
+
 import pynmea2
 import serial
 
