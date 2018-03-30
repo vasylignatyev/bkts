@@ -1,9 +1,0 @@
-bkts.py[LINE:627]# ERROR    [2018-02-18 08:54:31,839]  NOT AUTHORISED
-bkts.py[LINE:2543]# WARNING  [2018-02-18 08:54:45,097]  INTERNET DISCONNECTED
-bkts.py[LINE:2536]# WARNING  [2018-02-18 08:54:48,117]  INTERNET CONNECTED
-bkts.py[LINE:1221]# ERROR    [2018-02-18 16:01:26,250]  Validator {'009977665513': {'in_order': True, 'mac': '009977665513', 'last_status': 0, 'type': 0, 'sw_version': '1.16', 'cnt': 0, 'status': 0, 'hw_version': '1.00'}} registration failed.
-bkts.py[LINE:631]# ERROR    [2018-02-18 16:59:58,983]  NOT AUTHORISED
-bkts.py[LINE:631]# ERROR    [2018-02-19 10:58:17,568]  NOT AUTHORISED
-bkts.py[LINE:639]# ERROR    [2018-02-19 12:05:34,177]  NOT AUTHORISED
-bkts.py[LINE:639]# ERROR    [2018-02-19 16:55:33,128]  NOT AUTHORISED
-bkts.py[LINE:1239]# ERROR    [2018-02-19 16:55:38,350]  Validator {'009977665513': {'last_status': 0, 'status': 0, 'hw_version': '1.00', 'in_order': True, 'type': 0, 'sw_version': '1.16', 'mac': '009977665513', 'cnt': 0}} registration failed.
