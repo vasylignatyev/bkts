@@ -8,6 +8,7 @@
 *.db
 # Json files
 *.json
+*.log
 
 # User-specific stuff:
 .idea/**/workspace.xml
