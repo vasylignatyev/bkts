@@ -48,7 +48,7 @@ class Emulator:
 
     def run(self):
         thread = threading.Thread(target=self.generator, args=())
-        # thread.daemon = True                            # Daemonize thread
+        thread.daemon = True                            # Daemonize thread
         thread.start()                                  # Start the execution
 
     def emmulate_gps(self):
@@ -77,19 +77,12 @@ class Emulator:
     def local_exec(self):
         self.emmulate_gps()
 
-    def on_connect(self, client, payload, flag, rc):
-        pass
-        # print("connected OK" if rc == 0 else "Bad connnection = {}".format(rc))
-
-    def on_message(self, client, userdata, message):
-        pass
-        # print("on_message: {}".format(message.payload.decode("utf-8")))
-
     def generator(self):
         broker = "localhost"
         self.client = mqtt.Client("GPS")  # create new instance
-        self.client.on_connect = self.on_connect  # attach function to callback
-        self.client.on_message = self.on_message  # attach function to callback
+
+        # self.client.on_connect = self.on_connect  # attach function to callback
+        # self.client.on_message = self.on_message  # attach function to callback
 
         # print("Connection to broker ", broker)
         try:
@@ -109,12 +102,6 @@ class Emulator:
 
             self.client.loop_stop()
             self.client.disconnect()
-
-        '''
-        while True:
-            # print("Hello world")
-            time.sleep(1)
-        '''
 
     def to_driver(self, payload):
         #print("to_driver")

@@ -1,8 +1,8 @@
 #!/usr/bin/python2
+
 import pynmea2
 import serial
 import time
-import json
 import datetime
 import paho.mqtt.client as mqtt
 import json
@@ -55,11 +55,10 @@ print("Start..")
 while 1:
     try:
         print("Try open tty..")
-        input = serial.Serial("/dev/ttyUSB1")
-        print(input)
-        streamreader = pynmea2.NMEAStreamReader(input, errors='ignore')
-        print(streamreader)
+        # input = serial.Serial("/dev/ttyUSB1")
+        input = serial.Serial("/dev/ttyACM0")
         input.flushInput()
+        streamreader = pynmea2.NMEAStreamReader(input, errors='ignore')
     except Exception as e:
         print(e)
         time.sleep(5)
@@ -68,13 +67,24 @@ while 1:
 
 while 1:
     try:
-        print("Try get msg..")
         for msg in streamreader.next():
             if type(msg) == pynmea2.types.talker.GGA:
-                f = open("/opt/telecard/gps.txt", 'w')
                 print(msg)
+                f = open("/opt/telecard/gps.txt", 'w')
                 json.dump(dict(latitude=msg.latitude,longitude=msg.longitude), f)
                 f.close()
+                '''
+                payload = dict(
+                    type=310,
+                    latitude = msg.latitude,
+                    longitude= msg.longitude,
+                )
+                to_driver(payload)
+
+                payload["type"] = 110
+
+                to_bkts(payload)
+                '''
 
     except Exception as e:
         print(e)

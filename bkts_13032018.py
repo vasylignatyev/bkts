@@ -38,24 +38,32 @@ def main():
 
     logfile = _script_dir + 'bkts.log'
 
-    if "debug" in sys.argv:
-        logging.basicConfig(format=u'%(filename)s[LINE:%(lineno)d]# %(levelname)-8s [%(asctime)s]  %(message)s',
-                        level=logging.DEBUG)
-        print("Debug is On...")
-    elif "info" in sys.argv:
-        logging.basicConfig(format=u'%(filename)s[LINE:%(lineno)d]# %(levelname)-8s [%(asctime)s]  %(message)s',
-                            level=logging.INFO)
-        print("INFO is On...")
-    else:
-        logging.basicConfig(format=u'%(filename)s[LINE:%(lineno)d]# %(levelname)-8s [%(asctime)s]  %(message)s',
-                        level=logging.WARNING, filename=logfile)
+    try:
+        if "debug" in sys.argv:
+            logging.basicConfig(format=u'%(filename)s[LINE:%(lineno)d]# %(levelname)-8s [%(asctime)s]  %(message)s',
+                            level=logging.DEBUG)
+            print("Debug is On...")
+        elif "info" in sys.argv:
+            logging.basicConfig(format=u'%(filename)s[LINE:%(lineno)d]# %(levelname)-8s [%(asctime)s]  %(message)s',
+                                level=logging.INFO)
+            print("INFO is On...")
+        else:
+            logging.basicConfig(format=u'%(filename)s[LINE:%(lineno)d]# %(levelname)-8s [%(asctime)s]  %(message)s',
+                            level=logging.WARNING, filename=logfile)
 
-    logging.debug("Start main!")
-    App()
+        logging.debug("Start main!")
+        App()
+    except KeyboardInterrupt:
+        logging.debug("Shutdown requested...exiting")
+    except Exception:
+        traceback.print_exc(file=sys.stdout)
+    sys.exit(0)
+
 
 class RegistrationError:
     def __init__(self):
         pass
+
 
 class MyError(Exception):
     def __init__(self, _error: object)->object:
@@ -74,8 +82,6 @@ class App(threading.Thread):
         super(App, self).__init__()
 
         self._script_dir = os.path.dirname(os.path.realpath(__file__)) + "/"
-
-        self.lock = threading.Lock()
 
         # CONSTANTS
         self.VERSION = "1.0.0"
@@ -106,8 +112,6 @@ class App(threading.Thread):
 
         self._leg_initialized = False
         self._db = None
-        self._db1 = None
-        self._cursor = None
         self._errorMessages = None
         self._cursor = None
 
@@ -273,7 +277,7 @@ class App(threading.Thread):
 
             # CREATE equipment
             # self._db.execute("DROP TABLE IF EXISTS equipment")
-            sql = "CREATE TABLE IF NOT EXISTS `equipment` " \
+            sql = "CREATE TABLE IF NOT EXISTS equipment " \
                   "(`mac` TEXT primary key," \
                   "`serial_number` TEXT," \
                   "`type` INTEGER," \
@@ -283,7 +287,7 @@ class App(threading.Thread):
             self.db().execute(sql)
 
             # CREATE deferred
-            self._db.execute("DROP TABLE IF EXISTS deferred")
+            # self._db.execute("DROP TABLE IF EXISTS deferred")
             sql = "CREATE TABLE IF NOT EXISTS deferred " \
                   "(`id` INTEGER PRIMARY KEY," \
                   "`route_guid` TEXT," \
@@ -328,99 +332,45 @@ class App(threading.Thread):
             self.db().execute(sql)
 
 
-            self.db_commit()
+            self.db().commit()
 
             #DISCONNECT
             self.db().close()
             self._db = None
-            self._cursor = None
 
         except sqlite3.Error as e:
             logging.error("DB ERROR: " + str(e))
-            self._db = None
-            self._cursor = None
 
     def db(self):
-        # logging.info("conn: {}, cursor {}".format(str(self._db), str(self._cursor)))
-        if not self._db or not self._cursor:
+        if self._db is None:
             logging.debug("connect to database")
-            # self._db = sqlite3.connect(self.DATABASE, timeout=10)
-
-            self._db = sqlite3.connect(self.DATABASE, check_same_thread=False, timeout=10)
-            self._cursor = self._db.cursor()
+            # self._db = sqlite3.connect(self.DATABASE, check_same_thread=False, timeout=10)
+            self._db = sqlite3.connect(self.DATABASE, timeout=10)
             self._db.isolation_level = None
             self._db.create_function("dist", 4, self.dist)
             self._db.create_function("t_diff", 2, self.t_diff)
-        return self._cursor
+        return self._db
 
-    def _db_(self):
-        # logging.info("conn: {}, cursor {}".format(str(self._db), str(self._cursor)))
-        if not self._db1:
-            logging.debug("connect to database")
-            # self._db1 = sqlite3.connect(self.DATABASE, timeout=10)
-
-            self._db1 = sqlite3.connect(self.DATABASE, check_same_thread=False, timeout=10)
-            self._db1.isolation_level = None
-            self._db1.create_function("dist", 4, self.dist)
-            self._db1.create_function("t_diff", 2, self.t_diff)
-        return self._db1
-
-    def db_exec(self, sql, fetchall=True):
-        self.lock.acquire()
+    def db_exec(self, sql):
         try:
-            c = self._db_().cursor()
-            if fetchall:
-                result = c.execute(sql).fetchall()
-            else:
-                result = c.execute(sql).fetchone()
-            c.close()
-            return result
+            return self.db().execute(sql)
         except sqlite3.Error as e:
             logging.error("DB ERROR: {}, sql: '{}'".format(str(e), sql))
             raise MyError(self.get_response('db_error'))
-        finally:
-            self.lock.release()
 
-    def db_execute(self, sql, params, fetchall=True):
-        self.lock.acquire()
+    def db_execute(self, sql, params):
         try:
-            c = self._db_().cursor()
-            if fetchall:
-                result = c.execute(sql, params).fetchall()
-            else:
-                result = c.execute(sql, params).fetchone()
-            c.close()
-            return result
-        except sqlite3.Error as e:
-            logging.error("DB ERROR: {}, sql: '{}', params: {}".format(str(e), sql, str(params)))
-            raise MyError(self.get_response('db_error'))
-        finally:
-            self.lock.release()
-
-    def db_cursor(self, sql, params = None):
-        try:
-            cur = self._db_().cursor()
-            cur.execute(sql, params)
-            return cur
-
+            return self.db().execute(sql, params)
         except sqlite3.Error as e:
             logging.error("DB ERROR: {}, sql: '{}', params: {}".format(str(e), sql, str(params)))
             raise MyError(self.get_response('db_error'))
 
     def db_executemany(self, sql, params):
         try:
-            c = self._db_().cursor()
-            c.executemany(sql, params)
-            c.close()
+            return self.db().executemany(sql, params)
         except sqlite3.Error as e:
             logging.error("DB ERROR: {}, sql: '{}', params: {}".format(str(e), sql, str(params[0])))
             raise MyError(self.get_response('db_error'))
-
-    def db_commit(self):
-        if self._db:
-            return self._db.commit()
-        else:
-            return False
 
     # Error`s Dictionary
     def get_response(self, name):
@@ -444,13 +394,6 @@ class App(threading.Thread):
                     error=dict(
                         eng="Already composted",
                         ukr="Вже компостований"
-                    ),
-                    code=1
-                ),
-                insufficient=dict(
-                    error=dict(
-                        eng="Insufficient balance",
-                        ukr="Недостатньо коштів"
                     ),
                     code=1
                 ),
@@ -581,8 +524,10 @@ class App(threading.Thread):
             return False
 
         sql = "SELECT MAX(`id`) FROM message"
-        row = self.db_exec(sql,False)
+        c = self.db_exec(sql)
+        row = c.fetchone()
         last_message_id = 0 if row[0] is None else row[0]
+        c.close()
 
         url = 'mob/v1/message/{}/{}'.format(self.driver_id, last_message_id)
         r = self.to_atelecom("GET", url, None)
@@ -608,7 +553,7 @@ class App(threading.Thread):
                     mesg_id=m_id,
                 )
                 self.to_driver(payload)
-            self.db_commit()
+            self.db().commit()
 
     def send_new_messages_to_driver(self):
         sql = "SELECT `id`,`title`,`text`,`created_at` ORDER BY time(`created_at`) DESC"
@@ -739,7 +684,7 @@ class App(threading.Thread):
         sql = "INSERT OR IGNORE INTO schedule (`station_id`,`direction`,`round`,`date`,`time`) VALUES " \
               "(:station_id,:direction,:round,:date,time(substr('00000'||:time, -5, 5)))"
         # self.db_executemany(sql, schedule)
-        self.db_commit()
+        self.db().commit()
 
         self.init_schedule_table()
 
@@ -784,8 +729,7 @@ class App(threading.Thread):
             "station_id": point_id,
         }
 
-        row = self.db_execute(sql, params, False)
-
+        row = self.db_execute(sql,params).fetchone()
         if row is not None:
             logging.info("CURRENT ROUND: {}".format(str(row[0])))
             self._curr_round = row[0]
@@ -814,13 +758,13 @@ class App(threading.Thread):
               "WHERE p.`direction`=:dir AND p.`type`=1 " \
               "ORDER BY p.`order`"
         params = {"round": self._curr_round, "wd": self._curr_weekday, "dir": self._direction}
-        rows = self.db_execute(sql, params)
+        cursor = self.db_execute(sql, params)
 
         insert = "INSERT INTO leg (`id`,`name`,`stime`,`variation`,`period`,`order`) " \
                  "VALUES (:id,:name,:stime,:var,:period,:order)"
 
         first_time = None
-        for row in rows:
+        for row in cursor:
             # logging.debug(str(row))
             if row[2] is None:
                 stime = 2000
@@ -848,7 +792,8 @@ class App(threading.Thread):
                 }
                 # logging.debug(str(params))
             self.db_execute(insert, params)
-        self.db_commit()
+        cursor.close()
+        self.db().commit()
 
         # self.update_schedule_table()
 
@@ -857,12 +802,12 @@ class App(threading.Thread):
         self.init_leg_table()
 
         sql = "SELECT `name`,`period`,`variation`,`id`,`order` FROM leg ORDER BY `order`"
-        rows = self.db_exec(sql)
+        cursor = self.db_exec(sql)
 
         self._last_deviation = 0
 
         schedule = []
-        for row in rows:
+        for row in cursor:
             # schedule.append(dict(zip(('name', 'schedule', 'lag'), row)))
             if row[2] >= -1000:
                 self._last_deviation = (-1) * int(row[2] / 60)
@@ -876,6 +821,7 @@ class App(threading.Thread):
                 schedule= -1000 if (row[1]>0)  else row[1],
                 lag=int(row[2]) if row[2] < -1000 else self._last_deviation,
             ))
+        cursor.close()
         if len(schedule) == 0:
             return False
         else:
@@ -899,11 +845,11 @@ class App(threading.Thread):
         sql = "SELECT `name`, -1001, -1001 FROM `point` " \
               "WHERE `direction`=1 AND `type`=1 ORDER BY `order`"
 
-        rows = self.db_exec(sql)
+        cursor = self.db_exec(sql)
         schedule = []
-        for row in rows:
+        for row in cursor:
             schedule.append(dict(zip(('name', 'schedule', 'lag'), row)))
-        # cursor.close()
+        cursor.close()
         logging.debug(str(schedule))
         payload = dict(
             type=330,
@@ -952,20 +898,41 @@ class App(threading.Thread):
         (self.latitude, self.longitude) = (lat, lon)
         logging.debug("on_gps_coordinates lat: {}, lon: {}".format(str(lat), str(lon)))
 
+        # Find direction
+        '''
+        if self._direction is None:
+            sql = "SELECT `latitude`,`longitude`,`id`,`order` FROM `point` " \
+                  "WHERE `type`=1 AND `direction`= :dir " \
+                  "ORDER BY `order` LIMIT 1"
+            logging.debug("Find first stop in derection 1")
+            point = self.db_execute(sql, {"dir":1}).fetchone()
+            # Are we here?
+            if point is not None:
+                distance = self.dist( lat, lon, point[0], point[1])
+                logging.debug("distance: {}".format(str(distance)))
+                if distance < self.ARRIVAL_RADIUS:
+                    self._direction = 1
+                    logging.debug("Find first stop in derection 2")
+            point = self.db_execute(sql, {"dir":2}).fetchone()
+            # Are we here?
+            if point is not None:
+                distance = self.dist( lat, lon, point[0], point[1])
+                logging.debug("distance: {}".format(str(distance)))
+                if distance < self.ARRIVAL_RADIUS:
+                    self._direction = 2
+        '''
+
         #normalaise direction to 1 or 2
         self._direction = 1 if self._direction == 1 else 2
         logging.debug( "Direction: {}. Order {}".format(self._direction, self._curr_order) )
 
         # searching for where we are
-        # logging.debug("searching for where we are")
-
         sql = "SELECT `id`,`name`,`order` FROM point " \
               "WHERE `type`=1 AND `direction`=:dir AND dist(:lat, :lon, `latitude` ,`longitude`) < :dist"
         params = {"dir":self._direction, "lat":lat, "lon":lon, "dist":self.stop_distance}
 
-        row = self.db_execute(sql, params, False)
-
-        # logging.debug("After searching for where we are")
+        row = None
+        #row = self.db_execute(sql,params).fetchone()
 
         if row is not None:
             # We are near a stop
@@ -976,7 +943,6 @@ class App(threading.Thread):
                 self._prev_order = self._curr_order
             elif self._curr_order < self._prev_order:
                 self.change_direction()
-                self._prev_order = self._curr_order
 
             #serch round/leg
             if self._curr_round is None:
@@ -1002,9 +968,6 @@ class App(threading.Thread):
         self.stop_distance = self.DEPARTURE_RADIUS
         self.new_search = True
         self._leg_initialized = False
-
-        self.clear_remote_leglist()
-        self.clear_local_leglist()
 
         self.start_leg()
 
@@ -1063,8 +1026,7 @@ class App(threading.Thread):
                 "station_id": self._curr_point_id,
                 "wd": self._curr_weekday
             }
-            row = self.db_execute(sql, params, False)
-
+            row = self.db_execute(sql, params).fetchone()
             if row is not None:
                 (self._curr_schedule_id, self._curr_schedule_time) = row
 
@@ -1093,7 +1055,7 @@ class App(threading.Thread):
         update = "UPDATE leg SET period = t_diff(time(:cst), time(`stime`)), variation= -2000 WHERE `order` > :order"
         params = { "cst": self._curr_schedule_time, "order": self._curr_order}
         self.db_execute(update, params)
-        self.db_commit()
+        self.db().commit()
 
         self.update_schedule_table()
         # **************************************************
@@ -1110,8 +1072,7 @@ class App(threading.Thread):
               "FROM point WHERE `type`= 1 AND `order`>= :co AND `direction` = :dir ORDER BY `order` LIMIT 3"
 
         params = {"dir":self._direction, "co":self._curr_order}
-        cursor = self._db_().cursor()
-        cursor.execute(sql, params)
+        cursor = self.db_execute(sql, params)
 
         prev_schedule_time = None
         cnt = 0
@@ -1124,7 +1085,7 @@ class App(threading.Thread):
                       "WHERE `station_id`= :sid AND `direction`= :dir AND `round`= :round LIMIT 1"
                 params = { "sid": row[1], "dir": self._direction, "round": self._curr_round}
 
-                schedule_row = self.db_execute(sql, params, False)
+                schedule_row = self.db_execute(sql, params).fetchone()
 
                 curr_schedule_time = schedule_row[0] if schedule_row is not None else None
                 if prev_schedule_time is None:
@@ -1181,7 +1142,7 @@ class App(threading.Thread):
                 "current_oder":self._curr_order,
                 "round":self._curr_round,
             }
-            result = self.db_execute(sql, params)
+            result = self.db_execute(sql, params).fetchall()
 
             sql = "SELECT `id`,`time` FROM `schedule` " \
                   "WHERE `time`>=:st AND `date`=:wd AND `direction`=:dir AND `round`=:round AND station_id=:station_id " \
@@ -1208,7 +1169,7 @@ class App(threading.Thread):
                     "round":self._curr_round,
                     "station_id":row[1]}
 
-                station_row = self.db_execute(sql,params, False)
+                station_row = self.db_execute(sql,params).fetchone()
 
                 logging.debug(str(station_row))
 
@@ -1256,6 +1217,8 @@ class App(threading.Thread):
     def ikts_registration_cb(self, reqDict):
         logging.debug("ikts_registration_cb: '{}'".format(str(reqDict)))
 
+        error = ""
+        args = ('mac', 'message_id', 'status', 'sw_version','hw_version', 'timestamp')
         try:
             mac = reqDict['mac']
             # message_id = reqDict['message_id']
@@ -1303,10 +1266,9 @@ class App(threading.Thread):
             )
         )
         # Send request
-        logging.warning("IKTS registration request: {}".format(str(payload)))
+        logging.info("IKTS registration request: {}".format(str(payload)))
         r = self.to_atelecom('POST', 'mob/v1/front/alarms/status', payload)
-        if r:
-            logging.info("Responce: {} text: {}".format(str(r), str(r.text)));
+        logging.info("Responce: {} text: {}".format(str(r), str(r.text)));
 
         # if r.status_code == requests.codes.ok:
 
@@ -1396,21 +1358,21 @@ class App(threading.Thread):
     Driver registration
     '''
     def on_validator_status_cb(self, payloadOBJ):
-        logging.debug("on_validator_status_cb: {}".format(str(payloadOBJ)))
+        logging.debug("on_validator_status_cb")
         # logging.debug(str(payloadOBJ))
         try:
             sql = "UPDATE `equipment` SET `cnt`=0 WHERE `mac`='{}'".format(payloadOBJ["validator_id"])
-            self.db_exec(sql)
+            # self.db_exec(sql)
         except KeyError as e:
             logging.error("Key error: {}".format(str(e)))
 
     def on_ikts_status_cb(self, payloadOBJ):
-        logging.debug("on_ikts_status_cb: {}".format(str(payloadOBJ)))
-
+        logging.debug("on_ikts_status_cb")
+        logging.debug(str(payloadOBJ))
         self._ikts_mac = payloadOBJ.get("mac", None)
         if self._ikts_mac is not None:
             sql = "UPDATE `equipment` SET `cnt`=0 WHERE `mac`='{}'".format(self._ikts_mac)
-            self.db_exec(sql)
+            # self.db_exec(sql)
 
     def conductorCB(self, payloadOBJ):
         logging.debug("Call for conductorCB")
@@ -1954,7 +1916,7 @@ class App(threading.Thread):
                 logging.info("Trusted: {}".format(str(trusted)))
                 self.db_execute(sql, trusted)
 
-            self.db_commit()
+            self.db().commit()
             self._trusted_updeted = True
 
     def get_multypass(self):
@@ -1975,20 +1937,14 @@ class App(threading.Thread):
             logging.info("Multipass list: {}".format(str(multipass_list)))
             self.db_executemany(sql, multipass_list)
 
-            self.db_commit()
+            self.db().commit()
             self._multipass_updeted = True
         else:
             logging.error(str(r))
 
     def get_equipment_list(self):
         '''
-        Type list:
-        BKTS:1,
-        Validator: 2,
-        Mobile Terminal: 3,
-        IKTS: 4,
-        MODEM: 11,
-        GPS: 12
+        BKTS:1, Validator: 2, IKTS: 4, MODEM: 11, GPS: 12
 
         [{'serial_number': '225.43', 'mac_address': 'EEF993E1BFDE', 'type': '1'},
         {'serial_number': '199.17', 'mac_address': '009977665512', 'type': '2'},
@@ -2018,14 +1974,10 @@ class App(threading.Thread):
             insert="INSERT OR IGNORE INTO `equipment` (`mac`,`serial_number`,`type`) VALUES (:mac, :serial, :type)"
             for box in self._equipment_list:
                 try:
-                    mac = box.get("mac_address")
-                    serial = box.get("serial_number")
-                    params = {"mac":mac, "serial": serial, "type": box["type"]}
-                    logging.info("Equipment: {}".format(str(params)))
-                    self.db_execute(insert, params)
+                    self.db_execute(insert,{"mac":box["mac_address"],"serial":box["serial_number"],"type":box["type"]})
                 except KeyError as e:
-                    logging.error("While walking equipment.Key: {} in: {}".format(str(e),str(box)))
-            self.db_commit()
+                    logging.error("Error while walking equipment.Key: {} in: {}".format(str(e),str(box)))
+            self.db().commit()
         else:
             logging.error("While receiving equipment list. Rsponce: {}".format(str(r)))
             return False
@@ -2057,6 +2009,7 @@ class App(threading.Thread):
         self.do_send_equipment_status = False
 
         logging.debug("send_equipment_list")
+        c = self.db().cursor()
         equipment = []
         # check for internet connection
         if self._internet_status is True:
@@ -2069,18 +2022,10 @@ class App(threading.Thread):
         else:
             equipment.append({"type": 1, "state": 0, "mac": self._mac})
 
-        # select for Mobile Terminal
-        sql = "SELECT 5,`last_status`,`mac` FROM `equipment` where type = 4"
-        rows = self.db_exec(sql, False)
-        if rows:
-            equipment.append({"type": 6, "state":  1, "mac": "000000000000"})
-        else:
-            equipment.append({"type": 6, "state": -2, "mac": "000000000000"})
-
         # select for IKTS
-        sql = "SELECT 5,`last_status`,`mac` FROM `equipment` where type = 4"
-        rows = self.db_exec(sql)
-        for row in rows:
+        sql = "SELECT 5,`last_status`,`mac` FROM equipment where type = 4"
+        result = c.execute(sql)
+        for row in result:
             (i, last_status, mac) = row
             equipment.append(dict(
                 type=i,
@@ -2088,9 +2033,9 @@ class App(threading.Thread):
                 mac=mac,
             ))
         # select for BKTS
-        sql = "SELECT 10,`last_status`,`mac` FROM `equipment` where type = 1"
-        rows = self.db_exec(sql)
-        for row in rows:
+        sql = "SELECT 10,`last_status`,`mac` FROM equipment where type = 1"
+        result = c.execute(sql)
+        for row in result:
             (i, last_status, mac) = row
             equipment.append(dict(
                 type=i,
@@ -2098,10 +2043,10 @@ class App(threading.Thread):
                 mac=mac,
             ))
         # select for validators
-        sql = "SELECT 7,`last_status`,`mac` FROM `equipment` where type = 2 LIMIT 3"
-        rows = self.db_exec(sql)
+        sql = "SELECT 7,`last_status`,`mac` FROM equipment where type = 2 LIMIT 3"
+        result = c.execute(sql)
         k = 0
-        for row in rows:
+        for row in result:
             (i, last_status, mac) = row
             equipment.append(dict(
                 type=i + k,
@@ -2114,9 +2059,6 @@ class App(threading.Thread):
             type=340,
             device=equipment
         )
-
-        logging.info("Equipment: {}".format(str(payload)))
-
         self.to_driver(payload)
     '''
       {'mac': 'B827EB8C06A0', 
@@ -2134,7 +2076,7 @@ class App(threading.Thread):
         self._message_id += 1
         payload = dict(
             type=50,
-            timestamp=int(datetime.datetime.now().timestamp()),
+            timestamp=datetime.datetime.timestamp,
             message_id=self._message_id,
             route_guid = self.route_guid,
             driver_name = self.driver_name,
@@ -2270,24 +2212,21 @@ class App(threading.Thread):
 
         sql = "DELETE FROM `equipment`"
         self.db_exec(sql)
-        self.db_commit()
+        self.db().commit()
 
 
     def clear_local_leglist(self):
-        logging.info("clear_local_leglist")
+        logging.debug("clear_local_leglist")
 
         sql = "DELETE FROM `leglist`"
-        self.db_exec(sql)
-        self.db_commit()
+        # self.db_exec(sql)
+        # sself.db().commit()
 
     def check_local_leglist(self, code):
-        logging.info("check_local_leglist")
+        logging.debug("check_local_leglist")
 
         sql = "SELECT COUNT(`id`) FROM `leglist` WHERE code = ?"
-        row = self.db_execute(sql,[code],False)
-
-        if row is None:
-            return None
+        row = self.db_execute(sql,[code]).fetchone()
 
         return row[0]
 
@@ -2295,7 +2234,7 @@ class App(threading.Thread):
         logging.debug("write_to_local_leglist")
         sql = "INSERT OR IGNORE INTO `leglist` (`code`, `created_at`) VALUES (?,?)"
         self.db_execute(sql, (code,int(datetime.datetime.now().timestamp()) ))
-        self.db_commit()
+        self.db().commit()
 
     def clear_remote_leglist(self):
         logging.debug("clear_remote_leglist")
@@ -2340,7 +2279,7 @@ class App(threading.Thread):
                     r.raise_for_status()
                 except Exception as e:
                     logging.error(str(e))
-                raise MyError(self.get_response('insufficient'))
+                raise MyError(self.get_response('conflict'))
             elif r.status_code == 201:
                 raise MyError(self.get_response('success'))
             elif r.status_code == 200:  # composted
@@ -2395,6 +2334,7 @@ class App(threading.Thread):
 
         if not self._driver_on_route:
             return False
+
         elif self.driver_card_number and self.driver_card_number == code:
             logging.info("Driver card received")
 
@@ -2406,9 +2346,6 @@ class App(threading.Thread):
             self.driver_logout()
 
             return False  # False is preventing for xdr recording
-
-        '''
-        '''
 
         if self.route_guid is None or self.vehicle_id is None:
             # Nothing to do.
@@ -2425,7 +2362,7 @@ class App(threading.Thread):
 
         # check in multipass
         sql = "SELECT `code` FROM `multipass` WHERE `code` = :code"
-        row = self.db_execute(sql, {'code': code}, False)
+        row = self.db_execute(sql, {'code': code}).fetchone()
 
         if row:
             # The code present in multipass database
@@ -2462,8 +2399,7 @@ class App(threading.Thread):
             else:
                 # Check in `trusted` database
                 sql = "SELECT `code` FROM `trusted` WHERE `code` = :code "
-                row = self.db_execute(sql, {"code": code}, False)
-
+                row = self.db_execute(sql, {"code": code}).fetchone()
                 if row:
                     # The Code is trusted
                     logging.info("Code '{}' present in trusted".format(code))
@@ -2500,7 +2436,7 @@ class App(threading.Thread):
         params = {"code": code, "timestamp": timestamp, "mac": self._mac, "vehicle_id": self.vehicle_id,
                   "route_guid": self.route_guid, 't_type': t_type}
         self.db_execute(sql, params)
-        self.db_commit()
+        self.db().commit()
 
         return True
 
@@ -2514,8 +2450,8 @@ class App(threading.Thread):
             ids = []
             sql = "SELECT `id`,`code`,`timestamp`,`mac`,`vehicle_id`,`route_guid`,`type` " \
                   "FROM `deferred` ORDER BY `timestamp`"
-            rows = self.db_exec(sql)
-
+            cursor = self.db_exec(sql)
+            rows = cursor.fetchall()
             for row in rows:
                 payload = {
                     'route':row[5],
@@ -2759,8 +2695,6 @@ class App(threading.Thread):
                 self.on_message_viewed(payload_dict)
             elif _type == 250:
                 self.on_event_recieved(payload_dict)
-            elif _type == 400:
-                self.send_debug(payload_dict)
             else:
                 logging.error("Unknown request type: '{}'".format(_type))
                 return False
@@ -2773,33 +2707,6 @@ class App(threading.Thread):
         except KeyError as e:
             logging.error("'on_message 'key error: {}".format(str(e)))
             return False
-
-    def send_debug(self, payload):
-        logging.debug("send_debug")
-
-        deferred = []
-        sql = "SELECT `code`, `type`, `timestamp` FROM `deferred` ORDER by `timestamp`"
-        rows = self.db_exec(sql)
-        for row in rows:
-            deferred.append({"code": row[0],"type": row[1],"timestamp": row[2],})
-
-        trusted = []
-        sql = "SELECT `code`, `quantity` FROM `trusted` ORDER by `code`"
-        rows = self.db_exec(sql)
-        for row in rows:
-            trusted.append({"code": row[0], "quantity": row[1], "rest": "N/A", "timestamp": payload["timestamp"]})
-
-        multipass = []
-        sql = "SELECT `code` FROM `multipass` ORDER by `code`"
-        rows = self.db_exec(sql)
-        for row in rows:
-            multipass.append({"code": row[0], "timestamp": payload["timestamp"]})
-
-        payload["deferred"] = deferred
-        payload["trusted"] = trusted
-        payload["multipass"] = multipass
-
-        self.to_driver(payload)
 
     def on_event_recieved(self, payload):
         logging.info("on_event_recieved {}".format(str(payload)))
@@ -2850,7 +2757,7 @@ class App(threading.Thread):
         return
 
     def to_driver(self, payload):
-        logging.info("to_driver: {}".format(str(payload)))
+        logging.debug("to_driver")
         self._message_id += 1
         payload['timestamp'] = int((time.time())) + self._utc_offset
         payload['mac'] = self._mac
@@ -2875,7 +2782,7 @@ class App(threading.Thread):
 
         self._local_exec_cnt += 1
 
-        if self._local_exec_cnt % 23 == 0:
+        if self._local_exec_cnt % 47 == 0:
             if self.token is not None:
                 self.get_messages()
         if self._local_exec_cnt % 5 == 0:
@@ -2889,6 +2796,7 @@ class App(threading.Thread):
     def local_exec_in_thred(self):
         while True:
             # logging.debug("check_internet")
+
             update_equipment_status = False
 
             try:

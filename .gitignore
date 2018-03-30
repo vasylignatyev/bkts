@@ -14,6 +14,10 @@
 .idea/**/tasks.xml
 .idea/dictionaries
 
+#
+dist-packages/
+tmp/
+
 # Sensitive or high-churn files:
 .idea/**/dataSources/
 .idea/**/dataSources.ids
